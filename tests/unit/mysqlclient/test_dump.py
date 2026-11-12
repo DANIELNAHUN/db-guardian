@@ -127,3 +127,25 @@ def test_dump_to_gzip_raises_and_removes_option_file(tmp_path, fake_mysqldump):
     assert "Access denied" in exc_info.value.stderr_tail
     assert "--fail" not in str(exc_info.value)
     assert not option_file_from(fake_mysqldump["args"]).exists()
+
+
+SLOW_DUMP = """
+import sys, time
+sys.stdout.write("-- partial\\n")
+sys.stdout.flush()
+time.sleep(30)
+"""
+
+
+def test_dump_timeout_kills_hung_mysqldump(tmp_path, monkeypatch):
+    import time as _time
+
+    script = tmp_path / "slow.py"
+    script.write_text(SLOW_DUMP)
+    real_spawn = dump_module._spawn
+    monkeypatch.setattr(dump_module, "_spawn",
+                        lambda args, **kw: real_spawn([sys.executable, str(script), *args[1:]], **kw))
+    start = _time.monotonic()
+    with pytest.raises(DumpError, match="timed out after 1s"):
+        dump_to_gzip(conn(), None, "8.0.46", tmp_path / "out.sql.gz", timeout_seconds=1)
+    assert _time.monotonic() - start < 15

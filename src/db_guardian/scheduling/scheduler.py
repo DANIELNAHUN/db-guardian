@@ -10,6 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import func, select
 
 from db_guardian.backups.models import Backup, BackupTrigger
+from db_guardian.backups.recovery import INTERRUPTED
 from db_guardian.backups.service import SourceUnavailable, enqueue_backup
 from db_guardian.sources.models import Source
 
@@ -109,7 +110,10 @@ class GuardianScheduler:
             ).all()
             last_by_source = dict(
                 session.execute(
-                    select(Backup.source_id, func.max(Backup.created_at)).group_by(Backup.source_id)
+                    # Runs interrupted by a restart do not count: they never completed.
+                    select(Backup.source_id, func.max(Backup.created_at))
+                    .where((Backup.error.is_(None)) | (Backup.error != INTERRUPTED))
+                    .group_by(Backup.source_id)
                 ).all()
             )
         for source in sources:

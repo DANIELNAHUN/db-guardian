@@ -8,6 +8,8 @@ import pymysql
 from db_guardian.mysqlclient.connection import ConnectionInfo
 
 CONNECT_TIMEOUT_SECONDS = 10
+# Bounds a silent network drop; generous because COUNT(*) on a large table is slow.
+READ_TIMEOUT_SECONDS = 3600
 
 
 class MissingTablesError(ValueError):
@@ -45,6 +47,7 @@ def _connect(conn: ConnectionInfo) -> pymysql.Connection:
         database=conn.database,
         charset="utf8mb4",
         connect_timeout=CONNECT_TIMEOUT_SECONDS,
+        read_timeout=READ_TIMEOUT_SECONDS,
     )
 
 

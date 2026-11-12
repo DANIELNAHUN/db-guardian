@@ -38,3 +38,16 @@ def test_recovery_marks_interrupted_and_removes_tmp(container):
 
 def test_recovery_with_no_backups_dir(container):
     assert recover_interrupted(container.session_factory, container.settings.backups_dir) == 0
+
+
+def test_sweep_removes_leftover_dump_workdirs(tmp_path):
+    from db_guardian.backups.recovery import sweep_dump_workdirs
+
+    leftover = tmp_path / "guardian-dump-abc123"
+    leftover.mkdir()
+    (leftover / "client.cnf").write_text('[client]\npassword="secret"\n')
+    unrelated = tmp_path / "other-dir"
+    unrelated.mkdir()
+    assert sweep_dump_workdirs(tmp_path) == 1
+    assert not leftover.exists()
+    assert unrelated.exists()

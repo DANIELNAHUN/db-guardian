@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from functools import partial
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -37,7 +38,7 @@ class Container:
 def build_container(
     settings: Settings,
     *,
-    dumper: Dumper = dump_to_gzip,
+    dumper: Dumper | None = None,
     metadata_reader: MetadataReader = capture_metadata,
     version_reader: Callable[[ConnectionInfo], str] = server_version,
 ) -> Container:
@@ -45,6 +46,8 @@ def build_container(
     init_db(engine)
     session_factory = make_session_factory(engine)
     box = SecretBox(settings.encryption_key)
+    if dumper is None:
+        dumper = partial(dump_to_gzip, timeout_seconds=settings.dump_timeout_seconds)
     runner = BackupRunner(session_factory, box, settings.backups_dir, dumper, metadata_reader)
     container = Container(
         settings=settings,

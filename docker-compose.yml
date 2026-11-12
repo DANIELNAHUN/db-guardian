@@ -1,5 +1,5 @@
 # Production deployment (runs on the ETL machine).
-#   cp .env.example .env   # fill in the secrets
+#   create .env first (see README > Environment variables)
 #   docker compose up -d --build
 services:
   db-guardian:

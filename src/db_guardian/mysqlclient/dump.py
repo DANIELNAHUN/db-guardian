@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from db_guardian.mysqlclient.connection import ConnectionInfo
 MYSQLDUMP = "mysqldump"
 CHUNK_SIZE = 1024 * 1024
 STDERR_TAIL_CHARS = 2000
+DUMP_WORKDIR_PREFIX = "guardian-dump-"
 
 Dumper = Callable[[ConnectionInfo, list[str] | None, str, Path], int]
 
@@ -79,13 +81,18 @@ def _spawn(args: list[str], **kwargs) -> subprocess.Popen:
 
 
 def dump_to_gzip(
-    conn: ConnectionInfo, tables: list[str] | None, server_version: str, dest: Path
+    conn: ConnectionInfo,
+    tables: list[str] | None,
+    server_version: str,
+    dest: Path,
+    timeout_seconds: float | None = None,
 ) -> int:
     """Run mysqldump into `dest` (gzip). Returns the compressed size.
 
-    Leaves `dest` in place on failure; the caller owns cleanup.
+    A dump running longer than `timeout_seconds` is killed (e.g. a silent network
+    drop). Leaves `dest` in place on failure; the caller owns cleanup.
     """
-    workdir = Path(tempfile.mkdtemp(prefix="guardian-dump-"))
+    workdir = Path(tempfile.mkdtemp(prefix=DUMP_WORKDIR_PREFIX))
     try:
         option_file = write_option_file(conn, workdir)
         args = build_dump_args(conn, tables, server_version, option_file)
@@ -93,15 +100,30 @@ def dump_to_gzip(
         with open(workdir / "stderr.log", "w+b") as stderr, gzip.open(dest, "wb", compresslevel=6) as out:
             with _spawn(args, stdout=subprocess.PIPE, stderr=stderr) as proc:
                 assert proc.stdout is not None
+                timed_out = threading.Event()
+                watchdog = None
+                if timeout_seconds:
+                    def _expire() -> None:
+                        timed_out.set()
+                        proc.kill()
+
+                    watchdog = threading.Timer(timeout_seconds, _expire)
+                    watchdog.daemon = True
+                    watchdog.start()
                 try:
                     while chunk := proc.stdout.read(CHUNK_SIZE):
                         out.write(chunk)
                 except BaseException:
                     proc.kill()  # e.g. disk full while writing: stop mysqldump too
                     raise
+                finally:
+                    if watchdog:
+                        watchdog.cancel()
                 code = proc.wait()
             stderr.seek(0)
             tail = stderr.read().decode(errors="replace")[-STDERR_TAIL_CHARS:].strip()
+        if timed_out.is_set():
+            raise DumpError(f"mysqldump timed out after {timeout_seconds:g}s and was killed", tail)
         if code != 0:
             raise DumpError(f"mysqldump exited with code {code}", tail)
         return dest.stat().st_size

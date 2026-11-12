@@ -120,3 +120,25 @@ def test_catch_up_enqueues_once_per_source(client, container):
     assert container.scheduler.catch_up(now) == []  # a queued backup now exists after the fire time
     with container.session_factory() as s:
         assert len(s.scalars(select(Backup)).all()) == 1
+
+
+def test_catch_up_reruns_backups_interrupted_by_restart(client, container):
+    from db_guardian.backups.recovery import recover_interrupted
+
+    sid = client.post("/sources", json=payload()).json()["id"]
+    now = utc(2026, 11, 12, 8, 30)  # 03:30 Lima, 03:00 run was queued then the service restarted
+    assert container.scheduler.catch_up(now) == [sid]
+    recover_interrupted(container.session_factory, container.settings.backups_dir)
+    assert container.scheduler.catch_up(now) == [sid]
+
+
+def test_catch_up_does_not_rerun_genuine_failures(client, container):
+    sid = client.post("/sources", json=payload()).json()["id"]
+    now = utc(2026, 11, 12, 8, 30)
+    container.scheduler.catch_up(now)
+    with container.session_factory() as s:
+        b = s.scalars(select(Backup)).one()
+        b.status = BackupStatus.FAILED
+        b.error = "mysqldump exited with code 2: Access denied"
+        s.commit()
+    assert container.scheduler.catch_up(now) == []

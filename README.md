@@ -41,6 +41,7 @@ Interactive API docs are at `http://localhost:8000/docs`.
 | `GUARDIAN_DOWNLOAD_TTL_SECONDS` | `900` | Lifetime of signed download links. |
 | `GUARDIAN_DEFAULT_RETENTION` | `3` | Successful backups kept when a source sets no retention. |
 | `GUARDIAN_MISFIRE_GRACE_SECONDS` | `3600` | A run missed while the service was down is executed on startup if it is at most this late. |
+| `GUARDIAN_DUMP_TIMEOUT_SECONDS` | `14400` | A dump running longer than this (e.g. after a silent network drop) is killed and marked failed. |
 | `GUARDIAN_DATA_DIR` | `/data` | SQLite (`guardian.db`) and backup files (`backups/`). |
 
 The service refuses to start when a required variable is missing or invalid, and names it.
