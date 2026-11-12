@@ -2,10 +2,13 @@ from collections.abc import Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
+from db_guardian.backups.models import BackupTrigger
+from db_guardian.backups.schemas import BackupOut, backup_out
+from db_guardian.backups.service import SourceUnavailable, enqueue_backup
 from db_guardian.container import Container
 from db_guardian.deps import get_container
 from db_guardian.sources.models import Source
-from db_guardian.sources.schemas import SourceCreate, SourceOut, SourceUpdate
+from db_guardian.sources.schemas import ConnectionTestOut, SourceCreate, SourceOut, SourceUpdate
 from db_guardian.sources.service import NameConflict, NotFound, SourceService
 from db_guardian.timefmt import to_display
 
@@ -105,3 +108,41 @@ def delete_source(
         raise not_found(exc) from exc
     c.on_source_changed(None, source_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{source_id}/backups", response_model=BackupOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_backup(
+    source_id: int,
+    response: Response,
+    service: SourceService = Depends(get_service),
+    c: Container = Depends(get_container),
+):
+    """Queue a manual backup. Returns the already-queued backup (200) if there is one."""
+    try:
+        service.get(source_id)
+    except NotFound as exc:
+        raise not_found(exc) from exc
+    try:
+        backup, created = enqueue_backup(c, source_id, BackupTrigger.MANUAL)
+    except SourceUnavailable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return backup_out(backup, c.settings.display_tz)
+
+
+@router.post("/{source_id}/test-connection", response_model=ConnectionTestOut)
+def test_connection(
+    source_id: int,
+    service: SourceService = Depends(get_service),
+    c: Container = Depends(get_container),
+):
+    try:
+        conn = service.connection(service.get(source_id))
+    except NotFound as exc:
+        raise not_found(exc) from exc
+    try:
+        return ConnectionTestOut(ok=True, server_version=c.version_reader(conn))
+    except Exception as exc:  # report any driver/network error to the caller
+        message = str(exc) or exc.__class__.__name__
+        return ConnectionTestOut(ok=False, error=message.replace(conn.password, "***"))

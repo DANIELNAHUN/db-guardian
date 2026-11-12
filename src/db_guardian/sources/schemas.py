@@ -73,3 +73,9 @@ class SourceOut(BaseModel):
     has_password: bool
     created_at: str | None
     updated_at: str | None
+
+
+class ConnectionTestOut(BaseModel):
+    ok: bool
+    server_version: str | None = None
+    error: str | None = None
