@@ -11,8 +11,8 @@ Phase 1 (backups) is implemented. Phase 2 (clone into another server) is not.
 ## Quick path
 
 1. Create a backup user on each MySQL server (see [Privileges](#mysql-privileges)).
-2. Create a `.env` file next to `docker-compose.yml` with at least `GUARDIAN_ENCRYPTION_KEY`
-   and `GUARDIAN_SIGNING_KEY` (see [Environment variables](#environment-variables)).
+2. `cp .env.example .env` and fill in `GUARDIAN_ENCRYPTION_KEY` and `GUARDIAN_SIGNING_KEY`
+   (see [Environment variables](#environment-variables)).
 3. `docker compose up -d --build`
 4. Register a database:
 

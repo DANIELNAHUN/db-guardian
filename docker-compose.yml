@@ -1,5 +1,5 @@
 # Production deployment (runs on the ETL machine).
-#   create .env first (see README > Environment variables)
+#   cp .env.example .env   # fill in the secrets
 #   docker compose up -d --build
 services:
   db-guardian:
@@ -7,6 +7,9 @@ services:
       context: .
       target: runtime
     env_file: .env
+    environment:
+      # Container clock and log timestamps. Schedules use GUARDIAN_DISPLAY_TZ.
+      TZ: America/Lima
     volumes:
       - ./data:/data
     ports:
