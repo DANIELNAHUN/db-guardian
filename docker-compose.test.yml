@@ -1,0 +1,40 @@
+# Integration tests against the same MySQL versions used in production:
+#   docker compose -f docker-compose.test.yml run --rm --build tests
+x-mysql-healthcheck: &mysql-healthcheck
+  test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+  interval: 3s
+  timeout: 3s
+  retries: 80
+
+services:
+  mysql57:
+    image: mysql:5.7.41
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - ./tests/integration/fixtures/01-seed.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+      - ./tests/integration/fixtures/02-grants-57.sql:/docker-entrypoint-initdb.d/02-grants.sql:ro
+    healthcheck: *mysql-healthcheck
+
+  mysql80:
+    image: mysql:8.0.46
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - ./tests/integration/fixtures/01-seed.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+      - ./tests/integration/fixtures/02-grants-80.sql:/docker-entrypoint-initdb.d/02-grants.sql:ro
+    healthcheck: *mysql-healthcheck
+
+  tests:
+    build:
+      context: .
+      target: test
+    environment:
+      IT_MYSQL57_HOST: mysql57
+      IT_MYSQL80_HOST: mysql80
+      IT_ROOT_PASSWORD: root
+    depends_on:
+      mysql57:
+        condition: service_healthy
+      mysql80:
+        condition: service_healthy
