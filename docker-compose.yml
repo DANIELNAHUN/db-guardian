@@ -1,0 +1,18 @@
+# Production deployment (runs on the ETL machine).
+#   cp .env.example .env   # fill in the secrets
+#   docker compose up -d --build
+services:
+  db-guardian:
+    build:
+      context: .
+      target: runtime
+    env_file: .env
+    volumes:
+      - ./data:/data
+    ports:
+      - "8000:8000"
+    mem_limit: 512m
+    restart: unless-stopped
+    extra_hosts:
+      # Reach a MySQL published on this same host as host.docker.internal.
+      - "host.docker.internal:host-gateway"

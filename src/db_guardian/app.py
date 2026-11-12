@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -51,4 +52,5 @@ def create_app(container: Container, *, start_background: bool = True) -> FastAP
 
 def build() -> FastAPI:
     """Uvicorn factory: `uvicorn db_guardian.app:build --factory`."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     return create_app(build_container(load_settings()))
