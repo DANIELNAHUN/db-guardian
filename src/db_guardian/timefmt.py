@@ -12,3 +12,10 @@ def to_display(dt: datetime | None, tz: str) -> str | None:
     if dt is None:
         return None
     return dt.replace(tzinfo=UTC).astimezone(ZoneInfo(tz)).isoformat()
+
+
+def from_client(dt: datetime, tz: str) -> datetime:
+    """Convert a client datetime to naive UTC; naive input is read in the display timezone."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo(tz))
+    return dt.astimezone(UTC).replace(tzinfo=None)

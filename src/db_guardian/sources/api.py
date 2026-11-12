@@ -1,18 +1,15 @@
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from db_guardian.container import Container
+from db_guardian.deps import get_container
 from db_guardian.sources.models import Source
 from db_guardian.sources.schemas import SourceCreate, SourceOut, SourceUpdate
 from db_guardian.sources.service import NameConflict, NotFound, SourceService
 from db_guardian.timefmt import to_display
 
 router = APIRouter(prefix="/sources", tags=["sources"])
-
-
-def get_container(request: Request) -> Container:
-    return request.app.state.container
 
 
 def get_service(container: Container = Depends(get_container)) -> Iterator[SourceService]:
