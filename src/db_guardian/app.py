@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from db_guardian.config import load_settings
 from db_guardian.container import Container, build_container
+from db_guardian.downloads.api import router as downloads_router
 from db_guardian.backups.api import router as backups_router
 from db_guardian.backups.recovery import recover_interrupted
 from db_guardian.sources.api import router as sources_router
@@ -44,6 +45,7 @@ def create_app(container: Container, *, start_background: bool = True) -> FastAP
 
     app.include_router(sources_router)
     app.include_router(backups_router)
+    app.include_router(downloads_router)
     return app
 
 
