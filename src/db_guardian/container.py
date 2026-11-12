@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,6 +18,8 @@ class Container:
     engine: Engine
     session_factory: sessionmaker[Session]
     box: SecretBox
+    # Called after a source is created/updated (source) or deleted (None).
+    on_source_changed: Callable[[Any, int], None] = field(default=lambda _source, _source_id: None)
 
 
 def build_container(settings: Settings, **overrides) -> Container:

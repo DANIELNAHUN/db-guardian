@@ -27,4 +27,5 @@ packages = ["src/db_guardian"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "--import-mode=importlib"
 markers = ["integration: needs MySQL servers and the mysqldump client"]

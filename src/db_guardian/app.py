@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from db_guardian.config import load_settings
 from db_guardian.container import Container, build_container
+from db_guardian.sources.api import router as sources_router
 
 
 def create_app(container: Container, *, start_background: bool = True) -> FastAPI:
@@ -27,6 +28,7 @@ def create_app(container: Container, *, start_background: bool = True) -> FastAP
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    app.include_router(sources_router)
     return app
 
 
