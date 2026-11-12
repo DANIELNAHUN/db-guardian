@@ -8,6 +8,7 @@ from db_guardian.container import Container, build_container
 from db_guardian.backups.api import router as backups_router
 from db_guardian.backups.recovery import recover_interrupted
 from db_guardian.sources.api import router as sources_router
+from db_guardian.timefmt import utcnow
 
 
 def create_app(container: Container, *, start_background: bool = True) -> FastAPI:
@@ -18,9 +19,12 @@ def create_app(container: Container, *, start_background: bool = True) -> FastAP
             return
         recover_interrupted(container.session_factory, container.settings.backups_dir)
         container.queue.start()
+        container.scheduler.start()
+        container.scheduler.catch_up(utcnow())
         try:
             yield
         finally:
+            container.scheduler.shutdown()
             container.queue.stop()
 
     app = FastAPI(title="db-guardian", lifespan=lifespan)

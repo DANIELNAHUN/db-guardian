@@ -13,6 +13,7 @@ from db_guardian.mysqlclient.dump import Dumper, dump_to_gzip
 from db_guardian.mysqlclient.connection import ConnectionInfo
 from db_guardian.mysqlclient.metadata import MetadataReader, capture_metadata, server_version
 from db_guardian.scheduling.queue import WorkQueue
+from db_guardian.scheduling.scheduler import GuardianScheduler
 
 
 @dataclass
@@ -30,6 +31,7 @@ class Container:
     version_reader: Callable[[ConnectionInfo], str]
     # Called after a source is created/updated (source) or deleted (None).
     on_source_changed: Callable[[Any, int], None] = field(default=lambda _source, _source_id: None)
+    scheduler: GuardianScheduler | None = None
 
 
 def build_container(
@@ -44,7 +46,7 @@ def build_container(
     session_factory = make_session_factory(engine)
     box = SecretBox(settings.encryption_key)
     runner = BackupRunner(session_factory, box, settings.backups_dir, dumper, metadata_reader)
-    return Container(
+    container = Container(
         settings=settings,
         engine=engine,
         session_factory=session_factory,
@@ -55,3 +57,6 @@ def build_container(
         queue=WorkQueue(),
         version_reader=version_reader,
     )
+    container.scheduler = GuardianScheduler(container)
+    container.on_source_changed = container.scheduler.sync_source
+    return container
