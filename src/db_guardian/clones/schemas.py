@@ -38,3 +38,27 @@ class ClonePreviewOut(BaseModel):
     only_in_target: list[str]
     matching: list[str]
     warnings: list[str]
+
+
+class CloneOut(BaseModel):
+    id: int
+    backup_id: int
+    source_name: str
+    target_host: str
+    target_port: int
+    target_database: str
+    target_user: str
+    status: str
+    error: str | None
+    created_at: str | None
+    started_at: str | None
+    finished_at: str | None
+    duration_seconds: float | None
+    progress: float
+    tables: list[str] | None
+    preview: dict | None
+
+
+class ClonePage(BaseModel):
+    items: list[CloneOut]
+    total: int

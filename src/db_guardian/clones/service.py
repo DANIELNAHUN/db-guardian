@@ -6,8 +6,9 @@ from fastapi import status
 from db_guardian.backups.models import Backup, BackupStatus, FileState
 from db_guardian.clones.diff import diff_schema, version_warnings
 from db_guardian.clones.guard import matches_source
+from db_guardian.clones.models import Clone, CloneStatus
 from db_guardian.clones.schemas import ClonePreviewOut, DifferingTableOut, MissingTableOut
-from db_guardian.clones.security import redact
+from db_guardian.clones.redact import redact
 from db_guardian.mysqlclient.connection import ConnectionInfo
 from db_guardian.mysqlclient.metadata import UnknownDatabaseError
 
@@ -66,3 +67,26 @@ def build_preview(container: "Container", backup_id: int, target: ConnectionInfo
         matching=diff.matching,
         warnings=version_warnings(source_version, schema.server_version, list(backup_tables.values())),
     )
+
+
+def enqueue_clone(container: "Container", backup_id: int, target: ConnectionInfo) -> Clone:
+    """Validate like the preview (raising CloneRejected synchronously), then queue the clone.
+
+    The target password only lives in the queued job's closure.
+    """
+    build_preview(container, backup_id, target)
+    with container.session_factory() as session:
+        backup = session.get(Backup, backup_id)
+        clone = Clone(
+            backup_id=backup_id,
+            source_name=backup.source_name,
+            target_host=target.host,
+            target_port=target.port,
+            target_database=target.database,
+            target_user=target.user,
+            status=CloneStatus.QUEUED,
+        )
+        session.add(clone)
+        session.commit()
+    container.queue.submit(f"clone:{clone.id}", lambda: container.clone_runner.run(clone.id, target))
+    return clone

@@ -2,6 +2,7 @@ import hmac
 
 from fastapi import Depends, Header, HTTPException, status
 
+from db_guardian.clones.redact import redact  # noqa: F401  (re-exported)
 from db_guardian.container import Container
 from db_guardian.deps import get_container
 
@@ -20,8 +21,3 @@ def require_clone_key(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "missing X-Clone-Key header")
     if not hmac.compare_digest(x_clone_key.encode(), expected.encode()):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "invalid clone key")
-
-
-def redact(message: str, secret: str) -> str:
-    """Hide a secret inside an error message (no-op for an empty secret)."""
-    return message.replace(secret, "***") if secret else message
