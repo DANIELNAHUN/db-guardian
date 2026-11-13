@@ -250,6 +250,21 @@ Compares the backup's stored metadata (§6.4) with the target's live schema
   production. *Designer's call.* Builder should resolve obvious aliases
   (`localhost`, `127.0.0.1`, `host.docker.internal`) when comparing.
 
+### 7.7 Decisions added at Phase 2 planning (2026-11-12)
+
+- The staging MySQL is reached **directly** over the network: the owner exposes
+  its port on the VPS (no SSH tunnel). Recommended: firewall it to the owner's
+  public IP.
+- Every connection to a clone target **requires TLS** (`ssl-mode=REQUIRED`);
+  MySQL 8 auto-generates server certificates, so no setup is needed. Server
+  certificates are not verified (self-signed). *Designer's call.*
+- `DEFINER=` clauses are stripped while restoring, so views, triggers and
+  routines are recreated by the target user, which usually lacks
+  `SET_USER_ID`/`SUPER`. *Designer's call.*
+- If `GUARDIAN_CLONE_KEY` is not set, clone endpoints answer 503 ("clone
+  disabled"); the rest of the service works.
+- Clone history (list/detail) does not require the key: it holds no secrets.
+
 ## 8. Deployment
 
 - Docker image: Python + MySQL 8.x client tools (`mysqldump`, `mysql`). The
