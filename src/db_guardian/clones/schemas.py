@@ -16,3 +16,25 @@ class TargetIn(BaseModel):
         return ConnectionInfo(
             host=self.host, port=self.port, user=self.user, password=self.password, database=self.database
         )
+
+
+class MissingTableOut(BaseModel):
+    name: str
+    create_sql: str
+
+
+class DifferingTableOut(BaseModel):
+    name: str
+    backup_create_sql: str
+    target_create_sql: str
+
+
+class ClonePreviewOut(BaseModel):
+    backup_id: int
+    source_version: str | None
+    target_version: str
+    missing_in_target: list[MissingTableOut]
+    structure_differs: list[DifferingTableOut]
+    only_in_target: list[str]
+    matching: list[str]
+    warnings: list[str]

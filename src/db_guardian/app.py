@@ -10,6 +10,7 @@ from db_guardian.config import load_settings
 from db_guardian.container import Container, build_container
 from db_guardian.downloads.api import router as downloads_router
 from db_guardian.backups.api import router as backups_router
+from db_guardian.clones.api import router as clones_router
 from db_guardian.backups.recovery import recover_interrupted, sweep_dump_workdirs
 from db_guardian.sources.api import router as sources_router
 from db_guardian.timefmt import utcnow
@@ -50,6 +51,7 @@ def create_app(container: Container, *, start_background: bool = True) -> FastAP
     app.include_router(sources_router)
     app.include_router(backups_router)
     app.include_router(downloads_router)
+    app.include_router(clones_router)
     return app
 
 
