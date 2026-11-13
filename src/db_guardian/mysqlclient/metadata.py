@@ -88,3 +88,90 @@ def capture_metadata(conn: ConnectionInfo, tables: list[str] | None) -> Snapshot
             result.append(TableMeta(name=name, row_count=row_count, create_sql=cur.fetchone()[1]))
         cur.execute("COMMIT")
         return SnapshotMeta(server_version=version, tables=result)
+
+
+# --- Clone targets -----------------------------------------------------------
+
+ER_BAD_DB_ERROR = 1049
+# Without global privileges MySQL hides whether a database exists and answers 1044.
+ER_DBACCESS_DENIED_ERROR = 1044
+
+
+class UnknownDatabaseError(ValueError):
+    def __init__(self, database: str) -> None:
+        super().__init__(f"target database '{database}' does not exist or the user cannot access it")
+        self.database = database
+
+
+class TlsUnavailableError(ConnectionError):
+    pass
+
+
+@dataclass
+class TargetSchema:
+    server_version: str
+    tables: dict[str, str]
+    # Binary logging on and log_bin_trust_function_creators off: a non-SUPER user
+    # cannot create triggers/routines (MySQL error 1419).
+    binlog_blocks_routines: bool = False
+
+
+TargetReader = Callable[[ConnectionInfo], TargetSchema]
+
+
+def _connect_tls(conn: ConnectionInfo) -> pymysql.Connection:
+    """Connect with TLS required. Self-signed server certificates are accepted.
+
+    PyMySQL silently stays in plaintext when the server offers no TLS, so the
+    session cipher is checked and the connection refused without one.
+    """
+    try:
+        db = pymysql.connect(
+            host=conn.host,
+            port=conn.port,
+            user=conn.user,
+            password=conn.password,
+            database=conn.database,
+            charset="utf8mb4",
+            connect_timeout=CONNECT_TIMEOUT_SECONDS,
+            read_timeout=READ_TIMEOUT_SECONDS,
+            ssl={"check_hostname": False, "verify_mode": False},
+        )
+    except pymysql.err.OperationalError as exc:
+        if exc.args and exc.args[0] in (ER_BAD_DB_ERROR, ER_DBACCESS_DENIED_ERROR):
+            raise UnknownDatabaseError(conn.database) from None
+        raise
+    if not _session_cipher(db):
+        db.close()
+        raise TlsUnavailableError(f"{conn.host}:{conn.port} does not offer TLS; refusing an unencrypted connection")
+    return db
+
+
+def _session_cipher(db: pymysql.Connection) -> str:
+    with db.cursor() as cur:
+        cur.execute("SHOW SESSION STATUS LIKE 'Ssl_cipher'")
+        row = cur.fetchone()
+        return row[1] if row else ""
+
+
+def target_session_cipher(conn: ConnectionInfo) -> str:
+    with _connect_tls(conn) as db:
+        return _session_cipher(db)
+
+
+def target_schema(conn: ConnectionInfo) -> TargetSchema:
+    """Server version and CREATE TABLE text of every base table in the target database."""
+    with _connect_tls(conn) as db, db.cursor() as cur:
+        cur.execute("SELECT VERSION(), @@global.log_bin, @@global.log_bin_trust_function_creators")
+        version, log_bin, trust_creators = cur.fetchone()
+        cur.execute("SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'")
+        names = [row[0] for row in cur.fetchall()]
+        tables = {}
+        for name in names:
+            cur.execute(f"SHOW CREATE TABLE {quote_identifier(name)}")
+            tables[name] = cur.fetchone()[1]
+        return TargetSchema(
+            server_version=version,
+            tables=tables,
+            binlog_blocks_routines=bool(log_bin) and not bool(trust_creators),
+        )

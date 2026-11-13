@@ -6,7 +6,7 @@ on a cron schedule, records tables, row counts, size, and duration for every run
 newest N files, and serves them as streaming downloads through expiring URLs.
 
 Design: [`docs/superpowers/specs/2026-11-12-db-guardian-design.md`](docs/superpowers/specs/2026-11-12-db-guardian-design.md).
-Phase 1 (backups) is implemented. Phase 2 (clone into another server) is not.
+Phase 1 (backups) and phase 2 (clone a backup into another server) are implemented.
 
 ## Quick path
 
@@ -35,7 +35,8 @@ Interactive API docs are at `http://localhost:8000/docs`.
 |----------|---------|-------|
 | `GUARDIAN_ENCRYPTION_KEY` | required | Fernet key that encrypts stored source passwords. Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Changing it makes stored passwords unreadable (re-enter them with `PATCH`). |
 | `GUARDIAN_SIGNING_KEY` | required | HMAC key for download links, at least 32 characters. Generate: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. |
-| `GUARDIAN_CLONE_KEY` | — | Reserved for phase 2 (clone). Not used yet. |
+| `GUARDIAN_CLONE_KEY` | — | Secret required in the `X-Clone-Key` header to preview or start a clone. Unset = clone endpoints answer 503. Generate like the signing key. |
+| `GUARDIAN_CLONE_TIMEOUT_SECONDS` | `14400` | A restore running longer than this is killed and the clone marked failed. |
 | `GUARDIAN_DISPLAY_TZ` | `UTC` | IANA timezone for cron schedules and API timestamps, e.g. `America/Lima`. |
 | `GUARDIAN_CORS_ORIGINS` | empty | Comma-separated origins allowed from a browser (the intranet UI). |
 | `GUARDIAN_DOWNLOAD_TTL_SECONDS` | `900` | Lifetime of signed download links. |
@@ -77,9 +78,67 @@ Changes made with `PATCH /sources/{id}` reschedule immediately, without a restar
 | `GET /backups/{id}` | One backup with tables and row counts. |
 | `POST /backups/{id}/download-url` | Returns a signed URL valid for `GUARDIAN_DOWNLOAD_TTL_SECONDS`. |
 | `GET /downloads/{id}?exp&sig` | Streams the `.sql.gz`. `403` bad/expired link, `410` file gone. |
+| `POST /backups/{id}/clone-preview` | Diff the backup against a target (needs `X-Clone-Key`). |
+| `POST /backups/{id}/clones` | Start a clone into a target (needs `X-Clone-Key`). |
+| `GET /clones`, `GET /clones/{id}` | Clone history, status and progress. |
 
 Backups run one at a time. Status flows `queued → running → success | failed`.
 Timestamps are returned in `GUARDIAN_DISPLAY_TZ`.
+
+## Cloning a backup into staging
+
+Two steps, both with the header `X-Clone-Key: <GUARDIAN_CLONE_KEY>` and the target in the body:
+
+```json
+{ "host": "staging.example.com", "port": 3306, "user": "stager", "password": "...", "database": "intranet" }
+```
+
+1. **Preview** — `POST /backups/{id}/clone-preview`. Changes nothing. Returns tables missing in the
+   target (with their `CREATE TABLE`), tables whose structure differs, tables that only exist in the
+   target, matching tables, and version warnings.
+2. **Clone** — `POST /backups/{id}/clones` → `202` with the clone id. Follow it with `GET /clones/{id}`
+   (`status`, `progress` from 0 to 1, `error`). History: `GET /clones?backup_id&status`.
+
+What a clone does:
+
+- Every table in the backup is dropped and recreated in the target with the backup's structure and
+  data. **Tables that only exist in the target are left untouched.**
+- `DEFINER=` clauses are removed, so views, triggers and routines are recreated by the target user.
+- Re-running a clone is safe; an interrupted one (for example a restart) is marked failed and must
+  be started again, because the target password is never stored.
+- It refuses any target that points at a configured backup source (`409`), so production cannot be
+  overwritten by mistake.
+
+| Response | Meaning |
+|----------|---------|
+| `401` / `403` | Missing / wrong `X-Clone-Key`. |
+| `409` | The target is one of your backup sources. |
+| `410` | The backup file was removed by retention. |
+| `422` | The target database does not exist or the user cannot access it. |
+| `502` | The target could not be reached (network, credentials, TLS). Message included. |
+| `503` | `GUARDIAN_CLONE_KEY` is not set. |
+
+### Preparing the staging server
+
+- **Network:** expose MySQL's port on the VPS **only to your network's public IP** (firewall rule).
+- **TLS:** every clone connection requires TLS. MySQL 8 enables it with self-signed certificates by
+  default; nothing to configure. A server without TLS is refused.
+- **Binary logging:** MySQL 8 has it on, and then a user without `SUPER` cannot create triggers or
+  functions (error 1419). Set this on staging (in `my.cnf` under `[mysqld]`, or
+  `SET PERSIST log_bin_trust_function_creators = 1;` as root):
+
+  ```ini
+  log_bin_trust_function_creators = 1
+  ```
+
+- **User:** grant the clone user rights on the target database only:
+
+  ```sql
+  CREATE USER 'stager'@'%' IDENTIFIED BY '...';
+  GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES,
+        CREATE VIEW, SHOW VIEW, TRIGGER, CREATE ROUTINE, ALTER ROUTINE, EVENT, LOCK TABLES
+     ON intranet.* TO 'stager'@'%';
+  ```
 
 ## Deployment notes
 

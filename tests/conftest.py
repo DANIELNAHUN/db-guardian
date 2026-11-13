@@ -14,6 +14,7 @@ def settings(tmp_path):
         signing_key="s" * 32,
         data_dir=tmp_path / "data",
         display_tz="America/Lima",
+        clone_key="test-clone-key",
     )
 
 

@@ -38,7 +38,7 @@ def _quote(value: str) -> str:
     return f'"{escaped}"'
 
 
-def write_option_file(conn: ConnectionInfo, directory: Path) -> Path:
+def write_option_file(conn: ConnectionInfo, directory: Path, ssl_mode: str | None = None) -> Path:
     """Write a [client] option file so the password never appears in argv."""
     path = directory / "client.cnf"
     content = (
@@ -48,6 +48,8 @@ def write_option_file(conn: ConnectionInfo, directory: Path) -> Path:
         f"host={_quote(conn.host)}\n"
         f"port={conn.port}\n"
     )
+    if ssl_mode:
+        content += f"ssl-mode={ssl_mode}\n"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", newline="\n") as fh:
         fh.write(content)
