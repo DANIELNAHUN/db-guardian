@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     default_retention: int = Field(default=3, ge=1)
     misfire_grace_seconds: int = Field(default=3600, ge=0)
     dump_timeout_seconds: int = Field(default=14400, ge=1)
+    clone_timeout_seconds: int = Field(default=14400, ge=1)
 
     @field_validator("encryption_key")
     @classmethod
