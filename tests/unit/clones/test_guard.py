@@ -59,9 +59,18 @@ def test_different_port_no_match(session):
     assert matches_source(session, target("localhost", port=3307)) is None
 
 
-def test_deleted_source_ignored(session):
-    assert matches_source(session, target("10.0.0.9", database="old")) is None
+def test_deleted_source_still_protected(session):
+    assert matches_source(session, target("10.0.0.9", database="old")).name == "old"
 
 
 def test_dns_failure_is_no_match(session):
     assert matches_source(session, target("staging.example.com", database="etl")) is None
+
+
+@pytest.mark.parametrize("host", ["127.0.0.2", "0.0.0.0", "::ffff:127.0.0.1", "localhost."])
+def test_more_loopback_forms_match(session, host):
+    assert matches_source(session, target(host)).name == "intranet"
+
+
+def test_database_name_is_case_insensitive(session):
+    assert matches_source(session, target("localhost", database="Intranet")).name == "intranet"

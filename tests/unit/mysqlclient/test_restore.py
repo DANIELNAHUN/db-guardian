@@ -21,6 +21,9 @@ if mode == "fail":
     sys.exit(1)
 if mode == "sleep":
     time.sleep(30)
+if mode == "hang_after_read":
+    sys.stdin.buffer.read()
+    time.sleep(30)
 with open(os.environ["FAKE_OUT"], "wb") as out:
     shutil.copyfileobj(sys.stdin.buffer, out)
 with open(os.environ["FAKE_OUT"] + ".args", "w") as out:
@@ -86,7 +89,7 @@ def test_restore_feeds_stripped_sql_and_reports_progress(fake_mysql, backup_file
     assert progress == sorted(progress)
     assert len(progress) <= 101
     args = Path(str(fake_mysql["out"]) + ".args").read_text().splitlines()
-    assert args[-1] == "staging"
+    assert args[-1] == "--database=staging"
     assert "--default-character-set=utf8mb4" in args
 
 
@@ -114,6 +117,27 @@ def test_restore_failure_raises_with_stderr(fake_mysql, backup_file):
 
 def test_restore_timeout_kills(fake_mysql, backup_file):
     fake_mysql["env"].setenv("FAKE_MODE", "sleep")
+    start = time.monotonic()
+    with pytest.raises(RestoreError, match="timed out after 1s"):
+        restore_gzip(CONN, backup_file, timeout_seconds=1)
+    assert time.monotonic() - start < 15
+
+
+def test_strip_definers_leaves_insert_rows_alone():
+    row = b"INSERT INTO `notes` VALUES (1,'see DEFINER=`root`@`localhost` in the view');\n"
+    assert strip_definers(row) == row
+
+
+def test_restore_passes_database_as_option_value(fake_mysql, backup_file):
+    dangerous = ConnectionInfo(host="h", port=3306, user="u", password="pw", database="--local-infile=1")
+    restore_gzip(dangerous, backup_file)
+    args = fake_mysql["seen"]["args"]
+    assert "--database=--local-infile=1" in args
+    assert "--local-infile=1" not in args
+
+
+def test_restore_timeout_covers_final_statements(fake_mysql, backup_file):
+    fake_mysql["env"].setenv("FAKE_MODE", "hang_after_read")
     start = time.monotonic()
     with pytest.raises(RestoreError, match="timed out after 1s"):
         restore_gzip(CONN, backup_file, timeout_seconds=1)

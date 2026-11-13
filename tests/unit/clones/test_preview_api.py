@@ -80,3 +80,18 @@ def test_preview_writes_nothing(client, backup, reader, container):
     assert sorted(p.name for p in container.settings.backups_dir.rglob("*")) == before
     with container.session_factory() as s:
         assert s.get(Backup, backup.id).status == BackupStatus.SUCCESS
+
+
+def test_validation_error_does_not_echo_password(client, backup, reader):
+    body = {"host": "staging.example", "user": "stager", "password": "pw-123"}  # database missing
+    for path in (f"/backups/{backup.id}/clone-preview", f"/backups/{backup.id}/clones"):
+        r = client.post(path, json=body, headers=KEY)
+        assert r.status_code == 422
+        assert "database" in r.text
+        assert "pw-123" not in r.text
+
+
+def test_preview_warns_when_binlog_blocks_routines(client, backup, reader):
+    reader.schema.binlog_blocks_routines = True
+    warnings = preview(client, backup.id).json()["warnings"]
+    assert any("log_bin_trust_function_creators" in w and "1419" in w for w in warnings)

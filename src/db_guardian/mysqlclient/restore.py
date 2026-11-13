@@ -28,8 +28,11 @@ class RestoreError(RuntimeError):
 
 
 def strip_definers(line: bytes) -> bytes:
-    """Remove DEFINER clauses so the target user becomes the definer of views/triggers/routines."""
-    if b"DEFINER=`" not in line:
+    """Remove DEFINER clauses so the target user becomes the definer of views/triggers/routines.
+
+    Data rows (mysqldump always starts them with "INSERT INTO ") are never touched.
+    """
+    if b"DEFINER=`" not in line or line.startswith(b"INSERT INTO "):
         return line
     return _DEFINER.sub(b"", line)
 
@@ -54,7 +57,14 @@ def restore_gzip(
     workdir = Path(tempfile.mkdtemp(prefix=DUMP_WORKDIR_PREFIX))
     try:
         option_file = write_option_file(conn, workdir, ssl_mode="REQUIRED")
-        args = [MYSQL, f"--defaults-extra-file={option_file}", "--default-character-set=utf8mb4", conn.database]
+        # The database goes in as an option value: a name like "--local-infile=1" must never
+        # be parsed as a client option.
+        args = [
+            MYSQL,
+            f"--defaults-extra-file={option_file}",
+            "--default-character-set=utf8mb4",
+            f"--database={conn.database}",
+        ]
         timed_out = threading.Event()
         with open(workdir / "stderr.log", "w+b") as stderr, open(source, "rb") as raw:
             with _spawn(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=stderr, bufsize=0) as proc:
@@ -76,16 +86,18 @@ def restore_gzip(
                     proc.kill()
                     raise
                 finally:
-                    if watchdog:
-                        watchdog.cancel()
                     try:
                         proc.stdin.close()
                     except OSError:
                         pass
+                # The watchdog stays armed until mysql exits: the last buffered
+                # statements can still hang (e.g. waiting on a metadata lock).
                 code = proc.wait()
+                if watchdog:
+                    watchdog.cancel()
             stderr.seek(0)
             tail = stderr.read().decode(errors="replace")[-STDERR_TAIL_CHARS:].strip()
-        if timed_out.is_set():
+        if timed_out.is_set() and code != 0:
             raise RestoreError(f"mysql restore timed out after {timeout_seconds:g}s and was killed", tail)
         if code != 0:
             raise RestoreError(f"mysql exited with code {code}", tail)

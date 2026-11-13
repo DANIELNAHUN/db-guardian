@@ -111,6 +111,9 @@ class TlsUnavailableError(ConnectionError):
 class TargetSchema:
     server_version: str
     tables: dict[str, str]
+    # Binary logging on and log_bin_trust_function_creators off: a non-SUPER user
+    # cannot create triggers/routines (MySQL error 1419).
+    binlog_blocks_routines: bool = False
 
 
 TargetReader = Callable[[ConnectionInfo], TargetSchema]
@@ -159,12 +162,16 @@ def target_session_cipher(conn: ConnectionInfo) -> str:
 def target_schema(conn: ConnectionInfo) -> TargetSchema:
     """Server version and CREATE TABLE text of every base table in the target database."""
     with _connect_tls(conn) as db, db.cursor() as cur:
-        cur.execute("SELECT VERSION()")
-        version = cur.fetchone()[0]
+        cur.execute("SELECT VERSION(), @@global.log_bin, @@global.log_bin_trust_function_creators")
+        version, log_bin, trust_creators = cur.fetchone()
         cur.execute("SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'")
         names = [row[0] for row in cur.fetchall()]
         tables = {}
         for name in names:
             cur.execute(f"SHOW CREATE TABLE {quote_identifier(name)}")
             tables[name] = cur.fetchone()[1]
-        return TargetSchema(server_version=version, tables=tables)
+        return TargetSchema(
+            server_version=version,
+            tables=tables,
+            binlog_blocks_routines=bool(log_bin) and not bool(trust_creators),
+        )

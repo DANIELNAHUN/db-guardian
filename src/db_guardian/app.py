@@ -3,7 +3,10 @@ import tempfile
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from db_guardian.config import load_settings
@@ -43,6 +46,12 @@ def create_app(container: Container, *, start_background: bool = True) -> FastAP
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI echoes the submitted body in each error's "input"; bodies carry passwords.
+        errors = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
     @app.get("/health")
     def health() -> dict[str, str]:

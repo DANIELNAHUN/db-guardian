@@ -1,39 +1,53 @@
 """Refuse clone targets that point at a configured backup source (production)."""
 
+import ipaddress
 import socket
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from db_guardian.mysqlclient.connection import ConnectionInfo
 from db_guardian.sources.models import Source
 
-LOCAL_ALIASES = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+LOCAL_NAMES = {"localhost", "host.docker.internal"}
 _LOCAL = "local"
 
 
+def _identity(address: str) -> str:
+    """'local' for loopback/unspecified addresses (incl. IPv4-mapped IPv6), else the address."""
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return address
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return _LOCAL if ip.is_loopback or ip.is_unspecified else str(ip)
+
+
 def _host_identities(host: str) -> set[str]:
-    """Names/addresses a host is known by: itself, 'local' for aliases, resolved IPs."""
-    name = host.strip().lower()
-    if name in LOCAL_ALIASES:
+    """Names/addresses a host is known by: itself, 'local' for loopback forms, resolved IPs."""
+    name = host.strip().lower().rstrip(".")
+    if name in LOCAL_NAMES:
         return {_LOCAL}
-    identities = {name}
+    identities = {_identity(name)}
     try:
         for *_rest, sockaddr in socket.getaddrinfo(name, None):
-            address = sockaddr[0]
-            identities.add(_LOCAL if address in LOCAL_ALIASES else address)
+            identities.add(_identity(sockaddr[0]))
     except (socket.gaierror, UnicodeError, OSError):
         pass
     return identities
 
 
 def matches_source(session: Session, target: ConnectionInfo) -> Source | None:
-    """Return the non-deleted source that the target points at, if any."""
+    """Return the source (deleted ones included: still production) the target points at.
+
+    Database names compare case-insensitively (servers with lower_case_table_names=1).
+    """
     candidates = session.scalars(
         select(Source).where(
-            Source.deleted_at.is_(None),
             Source.port == target.port,
-            Source.database == target.database,
+            func.lower(Source.database) == target.database.lower(),
         )
     ).all()
     if not candidates:

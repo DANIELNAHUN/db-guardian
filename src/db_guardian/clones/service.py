@@ -65,7 +65,7 @@ def build_preview(container: "Container", backup_id: int, target: ConnectionInfo
         ],
         only_in_target=diff.only_in_target,
         matching=diff.matching,
-        warnings=version_warnings(source_version, schema.server_version, list(backup_tables.values())),
+        warnings=_warnings(source_version, schema, list(backup_tables.values())),
     )
 
 
@@ -90,3 +90,17 @@ def enqueue_clone(container: "Container", backup_id: int, target: ConnectionInfo
         session.commit()
     container.queue.submit(f"clone:{clone.id}", lambda: container.clone_runner.run(clone.id, target))
     return clone
+
+
+BINLOG_WARNING = (
+    "binary logging is on and log_bin_trust_function_creators is off on the target: "
+    "creating triggers or routines will fail with error 1419 unless the clone user has SUPER; "
+    "set log_bin_trust_function_creators = 1 on the target"
+)
+
+
+def _warnings(source_version: str | None, schema, backup_sql: list[str]) -> list[str]:
+    warnings = version_warnings(source_version, schema.server_version, backup_sql)
+    if schema.binlog_blocks_routines:
+        warnings.append(BINLOG_WARNING)
+    return warnings
