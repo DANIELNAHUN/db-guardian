@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 
 import pymysql
@@ -76,3 +77,43 @@ def sql(root):
 def restore_into(root):
     """Restore a .sql.gz into a fresh database: restore_into(path, database)."""
     return lambda dump_file, database: restore(root, dump_file, database)
+
+
+STAGER_PASSWORD = 'st@ge"r#1'
+STAGER_PRIVILEGES = (
+    "SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, INDEX, REFERENCES, CREATE VIEW, "
+    "SHOW VIEW, TRIGGER, CREATE ROUTINE, ALTER ROUTINE, EVENT, LOCK TABLES"
+)
+
+
+@pytest.fixture
+def root80() -> ConnectionInfo:
+    return ConnectionInfo(
+        host=_host("IT_MYSQL80_HOST"), port=3306, user="root",
+        password=os.environ.get("IT_ROOT_PASSWORD", "root"), database="mysql",
+    )
+
+
+@pytest.fixture
+def conn80() -> ConnectionInfo:
+    return ConnectionInfo(
+        host=_host("IT_MYSQL80_HOST"), port=3306, user="guardian", password=GUARDIAN_PASSWORD, database="shop"
+    )
+
+
+@pytest.fixture
+def staging(root80):
+    """A fresh pre-populated target database on mysql80 for the unprivileged user 'stager'."""
+    database = f"staging_{uuid.uuid4().hex[:8]}"
+    statements = [
+        f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4",
+        f"CREATE TABLE `{database}`.customers (id INT PRIMARY KEY, full_name VARCHAR(50))",
+        f"CREATE TABLE `{database}`.extra_only (id INT PRIMARY KEY)",
+        f"INSERT INTO `{database}`.extra_only VALUES (1)",
+        "CREATE USER IF NOT EXISTS 'stager'@'%' IDENTIFIED BY 'st@ge\"r#1'",
+        f"GRANT {STAGER_PRIVILEGES} ON `{database}`.* TO 'stager'@'%'",
+    ]
+    for statement in statements:
+        root_query(root80, statement)
+    yield ConnectionInfo(host=root80.host, port=3306, user="stager", password=STAGER_PASSWORD, database=database)
+    root_query(root80, f"DROP DATABASE IF EXISTS `{database}`")
