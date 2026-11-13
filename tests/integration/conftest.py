@@ -117,3 +117,9 @@ def staging(root80):
         root_query(root80, statement)
     yield ConnectionInfo(host=root80.host, port=3306, user="stager", password=STAGER_PASSWORD, database=database)
     root_query(root80, f"DROP DATABASE IF EXISTS `{database}`")
+
+
+@pytest.fixture
+def sql80(root80):
+    """Run SQL as root on mysql80: sql80("SELECT ...", database=None) -> rows."""
+    return lambda statement, database=None: root_query(root80, statement, database)
