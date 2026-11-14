@@ -1,5 +1,6 @@
 import gzip
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -134,6 +135,15 @@ def test_restore_passes_database_as_option_value(fake_mysql, backup_file):
     args = fake_mysql["seen"]["args"]
     assert "--database=--local-infile=1" in args
     assert "--local-infile=1" not in args
+
+
+def test_restore_feed_error_cancels_watchdog(fake_mysql, backup_file):
+    def boom(_fraction):
+        raise RuntimeError("progress sink broke")
+
+    with pytest.raises(RuntimeError, match="progress sink broke"):
+        restore_gzip(CONN, backup_file, on_progress=boom, timeout_seconds=60)
+    assert not [t for t in threading.enumerate() if isinstance(t, threading.Timer) and t.is_alive()]
 
 
 def test_restore_timeout_covers_final_statements(fake_mysql, backup_file):

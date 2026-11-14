@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     download_ttl_seconds: int = Field(default=900, ge=1)
     display_tz: str = "UTC"
     cors_origins: Annotated[list[str], NoDecode] = []
+    host_addresses: Annotated[list[str], NoDecode] = []
     data_dir: Path = Path("/data")
     default_retention: int = Field(default=3, ge=1)
     misfire_grace_seconds: int = Field(default=3600, ge=0)
@@ -47,9 +48,9 @@ class Settings(BaseSettings):
             raise ValueError(f"unknown timezone {value!r}") from exc
         return value
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "host_addresses", mode="before")
     @classmethod
-    def _split_origins(cls, value: object) -> object:
+    def _split_csv(cls, value: object) -> object:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value

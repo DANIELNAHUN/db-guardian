@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import pymysql
+from pymysql.constants import CLIENT
 
 from db_guardian.mysqlclient.connection import ConnectionInfo
 
@@ -103,8 +104,19 @@ class UnknownDatabaseError(ValueError):
         self.database = database
 
 
-class TlsUnavailableError(ConnectionError):
-    pass
+class TlsUnavailableError(RuntimeError):
+    """Not an OSError on purpose: PyMySQL rewraps those into a generic "Can't connect"."""
+
+
+class _TlsOnlyConnection(pymysql.connections.Connection):
+    """Refuses a server that does not offer TLS before any credential is sent."""
+
+    def _request_authentication(self):
+        if not self.server_capabilities & CLIENT.SSL:
+            raise TlsUnavailableError(
+                f"{self.host}:{self.port} does not offer TLS; refusing an unencrypted connection"
+            )
+        super()._request_authentication()
 
 
 @dataclass
@@ -123,10 +135,11 @@ def _connect_tls(conn: ConnectionInfo) -> pymysql.Connection:
     """Connect with TLS required. Self-signed server certificates are accepted.
 
     PyMySQL silently stays in plaintext when the server offers no TLS, so the
-    session cipher is checked and the connection refused without one.
+    handshake is refused before authentication and the session cipher is checked
+    afterwards as a second line of defense.
     """
     try:
-        db = pymysql.connect(
+        db = _TlsOnlyConnection(
             host=conn.host,
             port=conn.port,
             user=conn.user,
@@ -162,8 +175,9 @@ def target_session_cipher(conn: ConnectionInfo) -> str:
 def target_schema(conn: ConnectionInfo) -> TargetSchema:
     """Server version and CREATE TABLE text of every base table in the target database."""
     with _connect_tls(conn) as db, db.cursor() as cur:
-        cur.execute("SELECT VERSION(), @@global.log_bin, @@global.log_bin_trust_function_creators")
-        version, log_bin, trust_creators = cur.fetchone()
+        cur.execute("SELECT VERSION(), @@global.log_bin")
+        version, log_bin = cur.fetchone()
+        trust_creators = _trust_function_creators(cur)
         cur.execute("SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'")
         names = [row[0] for row in cur.fetchall()]
         tables = {}
@@ -173,5 +187,14 @@ def target_schema(conn: ConnectionInfo) -> TargetSchema:
         return TargetSchema(
             server_version=version,
             tables=tables,
-            binlog_blocks_routines=bool(log_bin) and not bool(trust_creators),
+            binlog_blocks_routines=bool(log_bin) and trust_creators is False,
         )
+
+
+def _trust_function_creators(cur) -> bool | None:
+    """Best effort: the variable is deprecated since MySQL 8.0.34. None = unknown (no warning)."""
+    try:
+        cur.execute("SELECT @@global.log_bin_trust_function_creators")
+        return bool(cur.fetchone()[0])
+    except pymysql.MySQLError:
+        return None

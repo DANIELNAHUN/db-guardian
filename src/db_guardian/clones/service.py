@@ -36,7 +36,7 @@ def build_preview(container: "Container", backup_id: int, target: ConnectionInfo
             or not Path(backup.file_path).is_file()
         ):
             raise CloneRejected(status.HTTP_410_GONE, "backup file is no longer available")
-        production = matches_source(session, target)
+        production = matches_source(session, target, container.settings.host_addresses)
         if production is not None:
             raise CloneRejected(
                 status.HTTP_409_CONFLICT,

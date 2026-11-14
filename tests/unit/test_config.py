@@ -55,6 +55,12 @@ def test_defaults(env, tmp_path):
     assert s.backups_dir == tmp_path / "backups"
 
 
+def test_host_addresses_comma_separated(env):
+    assert load_settings().host_addresses == []
+    env.setenv("GUARDIAN_HOST_ADDRESSES", "192.168.1.50, etl-box")
+    assert load_settings().host_addresses == ["192.168.1.50", "etl-box"]
+
+
 def test_cors_origins_comma_separated(env):
     env.setenv("GUARDIAN_CORS_ORIGINS", "http://a.local, http://b.local")
     assert load_settings().cors_origins == ["http://a.local", "http://b.local"]

@@ -2,6 +2,7 @@
 
 import ipaddress
 import socket
+from collections.abc import Iterable
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -25,10 +26,18 @@ def _identity(address: str) -> str:
     return _LOCAL if ip.is_loopback or ip.is_unspecified else str(ip)
 
 
-def _host_identities(host: str) -> set[str]:
-    """Names/addresses a host is known by: itself, 'local' for loopback forms, resolved IPs."""
-    name = host.strip().lower().rstrip(".")
-    if name in LOCAL_NAMES:
+def _normalize(host: str) -> str:
+    return host.strip().lower().rstrip(".")
+
+
+def _host_identities(host: str, local_hosts: frozenset[str] = frozenset()) -> set[str]:
+    """Names/addresses a host is known by: itself, 'local' for loopback forms, resolved IPs.
+
+    `local_hosts` are extra names/addresses of this machine (e.g. its LAN IP), which
+    reach the same MySQL as host.docker.internal from inside the container.
+    """
+    name = _normalize(host)
+    if name in LOCAL_NAMES or name in local_hosts:
         return {_LOCAL}
     identities = {_identity(name)}
     try:
@@ -36,10 +45,14 @@ def _host_identities(host: str) -> set[str]:
             identities.add(_identity(sockaddr[0]))
     except (socket.gaierror, UnicodeError, OSError):
         pass
+    if identities & local_hosts:
+        identities.add(_LOCAL)
     return identities
 
 
-def matches_source(session: Session, target: ConnectionInfo) -> Source | None:
+def matches_source(
+    session: Session, target: ConnectionInfo, local_hosts: Iterable[str] = ()
+) -> Source | None:
     """Return the source (deleted ones included: still production) the target points at.
 
     Database names compare case-insensitively (servers with lower_case_table_names=1).
@@ -52,8 +65,9 @@ def matches_source(session: Session, target: ConnectionInfo) -> Source | None:
     ).all()
     if not candidates:
         return None
-    target_ids = _host_identities(target.host)
+    local = frozenset(_normalize(h) for h in local_hosts)
+    target_ids = _host_identities(target.host, local)
     for source in candidates:
-        if target_ids & _host_identities(source.host):
+        if target_ids & _host_identities(source.host, local):
             return source
     return None

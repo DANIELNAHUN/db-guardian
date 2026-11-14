@@ -79,22 +79,24 @@ def restore_gzip(
                     watchdog.daemon = True
                     watchdog.start()
                 try:
-                    _feed(gzip.GzipFile(fileobj=raw), raw, total, proc.stdin, on_progress)
-                except BrokenPipeError:
-                    pass  # mysql exited early; its exit code and stderr explain why
-                except BaseException:
-                    proc.kill()
-                    raise
-                finally:
                     try:
-                        proc.stdin.close()
-                    except OSError:
-                        pass
-                # The watchdog stays armed until mysql exits: the last buffered
-                # statements can still hang (e.g. waiting on a metadata lock).
-                code = proc.wait()
-                if watchdog:
-                    watchdog.cancel()
+                        _feed(gzip.GzipFile(fileobj=raw), raw, total, proc.stdin, on_progress)
+                    except BrokenPipeError:
+                        pass  # mysql exited early; its exit code and stderr explain why
+                    except BaseException:
+                        proc.kill()
+                        raise
+                    finally:
+                        try:
+                            proc.stdin.close()
+                        except OSError:
+                            pass
+                    # The watchdog stays armed until mysql exits: the last buffered
+                    # statements can still hang (e.g. waiting on a metadata lock).
+                    code = proc.wait()
+                finally:
+                    if watchdog:
+                        watchdog.cancel()
             stderr.seek(0)
             tail = stderr.read().decode(errors="replace")[-STDERR_TAIL_CHARS:].strip()
         if timed_out.is_set() and code != 0:

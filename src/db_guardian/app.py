@@ -19,6 +19,19 @@ from db_guardian.sources.api import router as sources_router
 from db_guardian.timefmt import utcnow
 
 
+def _safe_error(error: dict) -> dict:
+    """A validation error without the submitted value; constraint context is kept only as scalars."""
+    safe = {k: v for k, v in error.items() if k not in ("input", "ctx")}
+    ctx = {
+        k: v
+        for k, v in (error.get("ctx") or {}).items()
+        if k != "error" and isinstance(v, (int, float, str, bool))
+    }
+    if ctx:
+        safe["ctx"] = ctx
+    return safe
+
+
 def create_app(container: Container, *, start_background: bool = True) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -50,7 +63,7 @@ def create_app(container: Container, *, start_background: bool = True) -> FastAP
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
         # FastAPI echoes the submitted body in each error's "input"; bodies carry passwords.
-        errors = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in exc.errors()]
+        errors = [_safe_error(e) for e in exc.errors()]
         return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
     @app.get("/health")

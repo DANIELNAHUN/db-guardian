@@ -1,6 +1,9 @@
 import json
+from pathlib import Path
 
 import pytest
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 from db_guardian.clones.models import Clone, CloneStatus
 from db_guardian.clones.runner import CloneRunner
@@ -17,9 +20,12 @@ class FakeRestorer:
         self.error = None
         self.steps = [i / 100 for i in range(1, 101)]
         self.persisted = []
+        self.on_start = None
 
     def __call__(self, conn, source, *, on_progress=None):
         self.calls.append((conn, source))
+        if self.on_start:
+            self.on_start()
         for step in self.steps:
             if on_progress:
                 on_progress(step)
@@ -84,6 +90,46 @@ def test_clone_target_unreachable(run_clone, reader, restorer):
     clone = run_clone()
     assert clone.status == CloneStatus.FAILED
     assert "connection refused" in clone.error
+    assert restorer.calls == []
+
+
+def test_failed_clone_still_records_tables(run_clone, restorer):
+    restorer.error = RestoreError("mysql exited with code 1", "ERROR 1064")
+    assert run_clone().tables == ["customers", "orders", "hist_sales"]
+
+
+def test_progress_write_failure_does_not_abort_restore(run_clone, restorer, monkeypatch):
+    failing = {"on": False}
+    real_commit = Session.commit
+
+    def commit(self):
+        if failing["on"]:
+            raise OperationalError("UPDATE clones", {}, Exception("database is locked"))
+        return real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", commit)
+    restorer.on_start = lambda: failing.update(on=True)
+    restorer.steps = [0.1, 0.5]
+    restorer.error = None
+    original_call = restorer.__class__.__call__
+
+    def call_then_recover(self, *args, **kwargs):
+        try:
+            original_call(self, *args, **kwargs)
+        finally:
+            failing["on"] = False
+
+    monkeypatch.setattr(restorer.__class__, "__call__", call_then_recover)
+    clone = run_clone()
+    assert clone.status == CloneStatus.SUCCESS
+    assert clone.progress == 1.0
+
+
+def test_backup_file_gone_before_run(run_clone, restorer, backup):
+    Path(backup.file_path).unlink()
+    clone = run_clone()
+    assert clone.status == CloneStatus.FAILED
+    assert clone.error == "backup file is no longer available (removed by retention?)"
     assert restorer.calls == []
 
 

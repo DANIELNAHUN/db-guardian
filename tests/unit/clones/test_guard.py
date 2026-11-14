@@ -72,5 +72,14 @@ def test_more_loopback_forms_match(session, host):
     assert matches_source(session, target(host)).name == "intranet"
 
 
+def test_lan_address_of_this_host_is_local_when_configured(session):
+    assert matches_source(session, target("192.168.1.50")) is None
+    assert matches_source(session, target("192.168.1.50"), local_hosts=["192.168.1.50"]).name == "intranet"
+
+
+def test_configured_host_name_is_local_case_insensitive(session):
+    assert matches_source(session, target("ETL-BOX"), local_hosts=["etl-box"]).name == "intranet"
+
+
 def test_database_name_is_case_insensitive(session):
     assert matches_source(session, target("localhost", database="Intranet")).name == "intranet"

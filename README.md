@@ -39,6 +39,7 @@ Interactive API docs are at `http://localhost:8000/docs`.
 | `GUARDIAN_CLONE_TIMEOUT_SECONDS` | `14400` | A restore running longer than this is killed and the clone marked failed. |
 | `GUARDIAN_DISPLAY_TZ` | `UTC` | IANA timezone for cron schedules and API timestamps, e.g. `America/Lima`. |
 | `GUARDIAN_CORS_ORIGINS` | empty | Comma-separated origins allowed from a browser (the intranet UI). |
+| `GUARDIAN_HOST_ADDRESSES` | empty | Comma-separated LAN IPs/hostnames of the machine running db-guardian. The clone guard treats them like `localhost`/`host.docker.internal`, so a target given as this machine's LAN IP is still recognized as a backup source. |
 | `GUARDIAN_DOWNLOAD_TTL_SECONDS` | `900` | Lifetime of signed download links. |
 | `GUARDIAN_DEFAULT_RETENTION` | `3` | Successful backups kept when a source sets no retention. |
 | `GUARDIAN_MISFIRE_GRACE_SECONDS` | `3600` | A run missed while the service was down is executed on startup if it is at most this late. |
@@ -145,6 +146,8 @@ What a clone does:
 - **Where it runs:** the ETL machine (more RAM, and the large ETL dump stays local).
 - **Reaching MySQL on the same host:** use `host.docker.internal` when MySQL publishes its
   port on the host, or attach the service to MySQL's Docker network and use its service name.
+  Set `GUARDIAN_HOST_ADDRESSES` to this machine's LAN IP so a clone target written with that
+  IP is refused like `host.docker.internal`.
 - **Reaching the intranet MySQL:** use its LAN IP.
 - **Data:** SQLite and backup files live in `./data` (mounted at `/data`).
 - **Memory:** capped at 512 MB so it cannot starve the database server.

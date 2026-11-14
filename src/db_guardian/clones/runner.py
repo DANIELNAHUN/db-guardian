@@ -3,6 +3,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from db_guardian.backups.models import Backup
@@ -17,6 +18,10 @@ from db_guardian.timefmt import utcnow
 logger = logging.getLogger(__name__)
 
 PROGRESS_STEP = 0.05
+
+
+class BackupFileGone(RuntimeError):
+    pass
 
 
 class CloneRunner:
@@ -42,6 +47,10 @@ class CloneRunner:
             try:
                 backup = session.get(Backup, clone.backup_id)
                 backup_tables = {t.name: t.create_sql for t in backup.tables}
+                clone.tables = list(backup_tables)
+                backup_file = Path(backup.file_path or "")
+                if not backup.file_path or not backup_file.is_file():
+                    raise BackupFileGone("backup file is no longer available (removed by retention?)")
                 schema = self.target_reader(target)
                 diff = diff_schema(backup_tables, schema.tables)
                 clone.preview = {
@@ -52,15 +61,15 @@ class CloneRunner:
                 }
                 session.commit()
 
-                self.restorer(target, Path(backup.file_path), on_progress=self._progress_saver(session, clone))
+                self.restorer(target, backup_file, on_progress=self._progress_saver(session, clone))
 
-                clone.tables = [t.name for t in backup.tables]
                 clone.progress = 1.0
                 clone.status = CloneStatus.SUCCESS
                 logger.info("clone %s of backup %s into %s succeeded", clone.id, backup.id, target.host)
             except Exception as exc:  # the worker must survive any failure
                 session.rollback()
                 clone = session.get(Clone, clone_id)
+                clone.tables = clone.tables or self._backup_tables(session, clone.backup_id)
                 clone.status = CloneStatus.FAILED
                 clone.error = redact(str(exc) or exc.__class__.__name__, target.password)
                 logger.error("clone %s failed: %s", clone_id, clone.error)
@@ -69,10 +78,19 @@ class CloneRunner:
             session.commit()
 
     @staticmethod
+    def _backup_tables(session: Session, backup_id: int) -> list[str] | None:
+        backup = session.get(Backup, backup_id)
+        return [t.name for t in backup.tables] if backup else None
+
+    @staticmethod
     def _progress_saver(session: Session, clone: Clone):
         def save(fraction: float) -> None:
             if fraction >= 1.0 or fraction - clone.progress >= PROGRESS_STEP:
                 clone.progress = min(fraction, 1.0)
-                session.commit()
+                try:
+                    session.commit()
+                except SQLAlchemyError as exc:  # progress is cosmetic: never abort the restore over it
+                    session.rollback()
+                    logger.warning("clone %s: could not save progress: %s", clone.id, exc)
 
         return save

@@ -91,6 +91,20 @@ def test_validation_error_does_not_echo_password(client, backup, reader):
         assert "pw-123" not in r.text
 
 
+def test_validation_error_keeps_constraint_context(client, backup, reader):
+    r = preview(client, backup.id, port=70000)
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["ctx"] == {"le": 65535}
+    assert "pw-123" not in r.text
+
+
+def test_preview_refuses_configured_lan_address(client, backup, reader, container):
+    container.settings = container.settings.model_copy(update={"host_addresses": ["192.168.1.50"]})
+    r = preview(client, backup.id, host="192.168.1.50")
+    assert r.status_code == 409
+    assert reader.calls == []
+
+
 def test_preview_warns_when_binlog_blocks_routines(client, backup, reader):
     reader.schema.binlog_blocks_routines = True
     warnings = preview(client, backup.id).json()["warnings"]
