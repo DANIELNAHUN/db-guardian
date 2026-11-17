@@ -155,10 +155,11 @@ def test_progress_survives_a_broken_session(run_clone, restorer, monkeypatch):
 def test_progress_never_reads_back_through_a_failing_database(run_clone, restorer, container):
     """Every statement fails while the database is down; the real rollback then expires the
     clone, so reading clone.progress would issue a SELECT that fails outside the saver's guard."""
-    down = {"on": False}
+    down = {"on": False, "refused": 0}
 
     def refuse(*_args, **_kwargs):
         if down["on"]:
+            down["refused"] += 1
             raise OperationalError("statement", {}, Exception("disk I/O error"))
 
     event.listen(container.engine, "before_cursor_execute", refuse)
@@ -170,6 +171,7 @@ def test_progress_never_reads_back_through_a_failing_database(run_clone, restore
         clone = run_clone()
     finally:
         event.remove(container.engine, "before_cursor_execute", refuse)
+    assert down["refused"] >= len(restorer.steps)  # every progress write hit the outage
     assert clone.status == CloneStatus.SUCCESS
     assert clone.progress == 1.0
 
