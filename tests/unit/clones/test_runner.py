@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -147,6 +148,28 @@ def test_progress_survives_a_broken_session(run_clone, restorer, monkeypatch):
     restorer.on_start = lambda: broken.update(on=True)
     restorer.on_end = lambda: broken.update(on=False)
     clone = run_clone()
+    assert clone.status == CloneStatus.SUCCESS
+    assert clone.progress == 1.0
+
+
+def test_progress_never_reads_back_through_a_failing_database(run_clone, restorer, container):
+    """Every statement fails while the database is down; the real rollback then expires the
+    clone, so reading clone.progress would issue a SELECT that fails outside the saver's guard."""
+    down = {"on": False}
+
+    def refuse(*_args, **_kwargs):
+        if down["on"]:
+            raise OperationalError("statement", {}, Exception("disk I/O error"))
+
+    event.listen(container.engine, "before_cursor_execute", refuse)
+    try:
+        restorer.steps = [0.1, 0.5, 0.9]
+        restorer.read_back = False
+        restorer.on_start = lambda: down.update(on=True)
+        restorer.on_end = lambda: down.update(on=False)
+        clone = run_clone()
+    finally:
+        event.remove(container.engine, "before_cursor_execute", refuse)
     assert clone.status == CloneStatus.SUCCESS
     assert clone.progress == 1.0
 
