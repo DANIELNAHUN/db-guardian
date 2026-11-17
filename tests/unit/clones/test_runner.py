@@ -21,6 +21,8 @@ class FakeRestorer:
         self.steps = [i / 100 for i in range(1, 101)]
         self.persisted = []
         self.on_start = None
+        self.on_end = None
+        self.read_back = True
 
     def __call__(self, conn, source, *, on_progress=None):
         self.calls.append((conn, source))
@@ -29,8 +31,11 @@ class FakeRestorer:
         for step in self.steps:
             if on_progress:
                 on_progress(step)
-            with self.container.session_factory() as s:
-                self.persisted.append(s.get(Clone, self.clone_id).progress)
+            if self.read_back:
+                with self.container.session_factory() as s:
+                    self.persisted.append(s.get(Clone, self.clone_id).progress)
+        if self.on_end:
+            self.on_end()
         if self.error:
             raise self.error
 
@@ -120,6 +125,27 @@ def test_progress_write_failure_does_not_abort_restore(run_clone, restorer, monk
             failing["on"] = False
 
     monkeypatch.setattr(restorer.__class__, "__call__", call_then_recover)
+    clone = run_clone()
+    assert clone.status == CloneStatus.SUCCESS
+    assert clone.progress == 1.0
+
+
+def test_progress_survives_a_broken_session(run_clone, restorer, monkeypatch):
+    broken = {"on": False}
+
+    def failing(real):
+        def call(self):
+            if broken["on"]:
+                raise OperationalError("UPDATE clones", {}, Exception("disk I/O error"))
+            return real(self)
+        return call
+
+    monkeypatch.setattr(Session, "commit", failing(Session.commit))
+    monkeypatch.setattr(Session, "rollback", failing(Session.rollback))
+    restorer.steps = [0.1, 0.5, 0.9]
+    restorer.read_back = False
+    restorer.on_start = lambda: broken.update(on=True)
+    restorer.on_end = lambda: broken.update(on=False)
     clone = run_clone()
     assert clone.status == CloneStatus.SUCCESS
     assert clone.progress == 1.0

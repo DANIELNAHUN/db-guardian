@@ -50,6 +50,17 @@ def _host_identities(host: str, local_hosts: frozenset[str] = frozenset()) -> se
     return identities
 
 
+def _canonical_local_hosts(hosts: Iterable[str]) -> frozenset[str]:
+    """Configured names/addresses in the same forms _host_identities produces."""
+    canonical = set()
+    for host in hosts:
+        name = _normalize(host)
+        if name:
+            canonical |= {name, _identity(name)}
+    canonical.discard(_LOCAL)
+    return frozenset(canonical)
+
+
 def matches_source(
     session: Session, target: ConnectionInfo, local_hosts: Iterable[str] = ()
 ) -> Source | None:
@@ -65,7 +76,7 @@ def matches_source(
     ).all()
     if not candidates:
         return None
-    local = frozenset(_normalize(h) for h in local_hosts)
+    local = _canonical_local_hosts(local_hosts)
     target_ids = _host_identities(target.host, local)
     for source in candidates:
         if target_ids & _host_identities(source.host, local):

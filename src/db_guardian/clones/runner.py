@@ -84,13 +84,26 @@ class CloneRunner:
 
     @staticmethod
     def _progress_saver(session: Session, clone: Clone):
+        """Progress is cosmetic: a failed write is logged and the restore goes on.
+
+        The last saved value is tracked locally so a broken session is never
+        touched again just to read the clone's progress back.
+        """
+        clone_id = clone.id
+        saved = [clone.progress or 0.0]
+
         def save(fraction: float) -> None:
-            if fraction >= 1.0 or fraction - clone.progress >= PROGRESS_STEP:
+            if fraction < 1.0 and fraction - saved[0] < PROGRESS_STEP:
+                return
+            try:
                 clone.progress = min(fraction, 1.0)
+                session.commit()
+                saved[0] = fraction
+            except SQLAlchemyError as exc:
+                logger.warning("clone %s: could not save progress: %s", clone_id, exc)
                 try:
-                    session.commit()
-                except SQLAlchemyError as exc:  # progress is cosmetic: never abort the restore over it
                     session.rollback()
-                    logger.warning("clone %s: could not save progress: %s", clone.id, exc)
+                except SQLAlchemyError:
+                    pass
 
         return save

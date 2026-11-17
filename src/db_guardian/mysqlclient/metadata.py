@@ -104,8 +104,8 @@ class UnknownDatabaseError(ValueError):
         self.database = database
 
 
-class TlsUnavailableError(RuntimeError):
-    """Not an OSError on purpose: PyMySQL rewraps those into a generic "Can't connect"."""
+class TlsUnavailableError(ConnectionError):
+    """PyMySQL wraps OSErrors raised during connect; _connect_tls unwraps this one."""
 
 
 class _TlsOnlyConnection(pymysql.connections.Connection):
@@ -151,6 +151,9 @@ def _connect_tls(conn: ConnectionInfo) -> pymysql.Connection:
             ssl={"check_hostname": False, "verify_mode": False},
         )
     except pymysql.err.OperationalError as exc:
+        original = getattr(exc, "original_exception", None)
+        if isinstance(original, TlsUnavailableError):
+            raise original from None
         if exc.args and exc.args[0] in (ER_BAD_DB_ERROR, ER_DBACCESS_DENIED_ERROR):
             raise UnknownDatabaseError(conn.database) from None
         raise

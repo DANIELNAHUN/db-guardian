@@ -81,5 +81,14 @@ def test_configured_host_name_is_local_case_insensitive(session):
     assert matches_source(session, target("ETL-BOX"), local_hosts=["etl-box"]).name == "intranet"
 
 
+@pytest.mark.parametrize("alias, host", [
+    ("::ffff:192.168.1.50", "192.168.1.50"),
+    ("192.168.1.50", "::ffff:192.168.1.50"),
+    (" etl-box. ", "etl-box"),
+])
+def test_configured_hosts_are_canonicalized(session, alias, host):
+    assert matches_source(session, target(host), local_hosts=[alias]).name == "intranet"
+
+
 def test_database_name_is_case_insensitive(session):
     assert matches_source(session, target("localhost", database="Intranet")).name == "intranet"

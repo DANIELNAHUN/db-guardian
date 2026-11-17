@@ -1,6 +1,9 @@
+import socket
+import struct
+import threading
+
 import pymysql
 import pytest
-from pymysql.constants import CLIENT
 
 from db_guardian.mysqlclient import metadata
 from db_guardian.mysqlclient.connection import ConnectionInfo
@@ -8,32 +11,79 @@ from db_guardian.mysqlclient.metadata import TlsUnavailableError, target_schema
 
 CONN = ConnectionInfo(host="staging.example", port=3306, user="stager", password="pw", database="staging")
 
-
-def handshake(capabilities: int, monkeypatch) -> list[str]:
-    """Run the TLS-only connection's auth step against a fake server handshake."""
-    sent = []
-    monkeypatch.setattr(pymysql.connections.Connection, "_request_authentication", lambda self: sent.append("auth"))
-    connection = object.__new__(metadata._TlsOnlyConnection)
-    connection.server_capabilities = capabilities
-    connection.host, connection.port = CONN.host, CONN.port
-    connection._request_authentication()
-    return sent
+CLIENT_PROTOCOL_41 = 0x0200
+CLIENT_SSL = 0x0800
+CLIENT_SECURE_CONNECTION = 0x8000
+CLIENT_PLUGIN_AUTH = 0x80000
 
 
-def test_server_without_tls_is_refused_before_credentials_are_sent(monkeypatch):
-    sent = []
+def handshake_packet(capabilities: int) -> bytes:
+    """A MySQL protocol-10 initial handshake advertising `capabilities`."""
+    payload = (
+        b"\x0a" + b"8.0.46\x00" + struct.pack("<I", 7) + b"abcdefgh\x00"
+        + struct.pack("<H", capabilities & 0xFFFF) + b"\x21" + struct.pack("<H", 2)
+        + struct.pack("<H", capabilities >> 16) + b"\x15" + b"\x00" * 10
+        + b"ijklmnopqrst\x00" + b"mysql_native_password\x00"
+    )
+    return struct.pack("<I", len(payload))[:3] + b"\x00" + payload
+
+
+class FakeServer:
+    """Sends one handshake and records every byte the client answers with."""
+
+    def __init__(self, capabilities: int):
+        self.capabilities = capabilities
+        self.received = b""
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(1)
+        self.port = self.sock.getsockname()[1]
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def _serve(self):
+        client, _ = self.sock.accept()
+        with client:
+            client.settimeout(2)
+            client.sendall(handshake_packet(self.capabilities))
+            try:
+                while chunk := client.recv(4096):
+                    self.received += chunk
+            except OSError:
+                pass
+
+    def close(self):
+        self.thread.join(timeout=5)
+        self.sock.close()
+
+
+@pytest.fixture
+def plaintext_server():
+    server = FakeServer(CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH)
+    yield server
+    server.close()
+
+
+def test_server_without_tls_is_refused_before_credentials_are_sent(plaintext_server):
+    conn = ConnectionInfo(host="127.0.0.1", port=plaintext_server.port, user="stager", password="pw-123",
+                          database="staging")
     with pytest.raises(TlsUnavailableError, match="does not offer TLS"):
-        sent = handshake(0, monkeypatch)
-    assert sent == []
+        metadata._connect_tls(conn)
+    plaintext_server.close()
+    assert plaintext_server.received == b""
+
+
+def test_tls_refusal_keeps_its_connection_error_contract():
+    assert issubclass(TlsUnavailableError, ConnectionError)
 
 
 def test_server_with_tls_proceeds_to_authentication(monkeypatch):
-    assert handshake(CLIENT.SSL, monkeypatch) == ["auth"]
-
-
-def test_tls_refusal_is_not_wrapped_as_connection_error():
-    # PyMySQL turns any OSError raised during connect into a generic "Can't connect" error.
-    assert not issubclass(TlsUnavailableError, OSError)
+    sent = []
+    monkeypatch.setattr(pymysql.connections.Connection, "_request_authentication", lambda self: sent.append("auth"))
+    connection = object.__new__(metadata._TlsOnlyConnection)
+    connection.server_capabilities = CLIENT_SSL
+    connection._request_authentication()
+    assert sent == ["auth"]
 
 
 class FakeCursor:
