@@ -40,6 +40,13 @@ class Settings(BaseSettings):
             raise ValueError("must be a valid Fernet key") from exc
         return value
 
+    @field_validator("api_token", mode="before")
+    @classmethod
+    def _strip_api_token(cls, value: object) -> object:
+        # Runs before min_length, so a stray space copied into .env neither counts toward
+        # the length nor makes every request fail with 401.
+        return value.strip() if isinstance(value, str) else value
+
     @field_validator("display_tz")
     @classmethod
     def _valid_timezone(cls, value: str) -> str:

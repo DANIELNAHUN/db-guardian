@@ -1,4 +1,9 @@
 import pytest
+from fastapi.testclient import TestClient
+
+from db_guardian.app import create_app
+from db_guardian.config import load_settings
+from db_guardian.container import build_container
 
 TOKEN_DETAIL = "missing or invalid API token"
 CLONE_KEY = {"X-Clone-Key": "test-clone-key"}
@@ -72,3 +77,14 @@ def test_wrong_token_with_right_clone_key_rejected(anon_client):
     response = anon_client.post("/backups/1/clone-preview", json=TARGET, headers=headers)
     assert response.status_code == 401
     assert response.json()["detail"] == TOKEN_DETAIL
+
+
+def test_configured_token_with_trailing_space_authenticates(monkeypatch, settings, tmp_path):
+    monkeypatch.setenv("GUARDIAN_API_TOKEN", "k" * 32 + " ")
+    monkeypatch.setenv("GUARDIAN_ENCRYPTION_KEY", settings.encryption_key)
+    monkeypatch.setenv("GUARDIAN_SIGNING_KEY", settings.signing_key)
+    monkeypatch.setenv("GUARDIAN_DATA_DIR", str(tmp_path / "env-data"))
+    container = build_container(load_settings())
+    with TestClient(create_app(container, start_background=False)) as c:
+        response = c.get("/sources", headers={"Authorization": "Bearer " + "k" * 32})
+    assert response.status_code == 200

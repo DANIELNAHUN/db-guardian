@@ -51,6 +51,17 @@ def test_short_api_token_rejected(env):
         load_settings()
 
 
+def test_api_token_surrounding_whitespace_is_trimmed(env):
+    env.setenv("GUARDIAN_API_TOKEN", "  " + "a" * 32 + " ")
+    assert load_settings().api_token == "a" * 32
+
+
+def test_api_token_length_checked_after_trimming(env):
+    env.setenv("GUARDIAN_API_TOKEN", "x" * 31 + "   ")
+    with pytest.raises(ConfigError, match="GUARDIAN_API_TOKEN"):
+        load_settings()
+
+
 def test_invalid_display_tz_fails(env):
     env.setenv("GUARDIAN_DISPLAY_TZ", "Mars/Base")
     with pytest.raises(ConfigError, match="GUARDIAN_DISPLAY_TZ"):

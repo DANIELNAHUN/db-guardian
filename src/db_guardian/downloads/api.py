@@ -46,6 +46,9 @@ def _available_file(backup: Backup) -> Path:
     return path
 
 
+# The token is attached per route, not on this router: GET /downloads/{id} must stay open
+# because browsers follow the link as a plain navigation (no Authorization header), and it is
+# already protected by its HMAC signature. Any new route added here needs the token explicitly.
 @router.post(
     "/backups/{backup_id}/download-url",
     response_model=DownloadUrlOut,

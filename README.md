@@ -37,7 +37,7 @@ Interactive API docs are at `http://localhost:8000/docs`.
 |----------|---------|-------|
 | `GUARDIAN_ENCRYPTION_KEY` | required | Fernet key that encrypts stored source passwords. Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Changing it makes stored passwords unreadable (re-enter them with `PATCH`). |
 | `GUARDIAN_SIGNING_KEY` | required | HMAC key for download links, at least 32 characters. Generate: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. |
-| `GUARDIAN_API_TOKEN` | required | Bearer token every API caller must send as `Authorization: Bearer <token>`, at least 32 characters. Only `GET /health` and `GET /downloads/{id}` are open. Generate like the signing key. |
+| `GUARDIAN_API_TOKEN` | required | Bearer token every API caller must send as `Authorization: Bearer <token>`, at least 32 characters (surrounding whitespace is ignored). Open without it: `GET /health`, `GET /downloads/{id}` and the schema-only `/docs`, `/redoc`, `/openapi.json`. Generate like the signing key. |
 | `GUARDIAN_CLONE_KEY` | — | Secret required in the `X-Clone-Key` header to preview or start a clone. Unset = clone endpoints answer 503. Generate like the signing key. |
 | `GUARDIAN_CLONE_TIMEOUT_SECONDS` | `14400` | A restore running longer than this is killed and the clone marked failed. |
 | `GUARDIAN_DISPLAY_TZ` | `UTC` | IANA timezone for cron schedules and API timestamps, e.g. `America/Lima`. |
@@ -75,6 +75,8 @@ Changes made with `PATCH /sources/{id}` reschedule immediately, without a restar
 
 Every route requires `Authorization: Bearer <GUARDIAN_API_TOKEN>` except `GET /health` and
 `GET /downloads/{id}` (already protected by its signature, so a browser can follow the link).
+FastAPI's `/docs`, `/redoc` and `/openapi.json` also stay open: they show the API schema only,
+no data. Surrounding whitespace in the configured token is ignored.
 A missing or wrong token answers `401` with `WWW-Authenticate: Bearer`. Clone routes also need
 `X-Clone-Key`; the token is checked first.
 
