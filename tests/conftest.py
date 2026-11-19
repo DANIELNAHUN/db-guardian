@@ -12,6 +12,7 @@ def settings(tmp_path):
     return Settings(
         encryption_key=Fernet.generate_key().decode(),
         signing_key="s" * 32,
+        api_token="t" * 32,
         data_dir=tmp_path / "data",
         display_tz="America/Lima",
         clone_key="test-clone-key",

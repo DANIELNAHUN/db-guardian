@@ -19,6 +19,7 @@ def test_backup_lifecycle_through_the_api(conn, tmp_path, tables, expected):
     settings = Settings(
         encryption_key=Fernet.generate_key().decode(),
         signing_key="s" * 32,
+        api_token="t" * 32,
         data_dir=tmp_path / "data",
         display_tz="America/Lima",
     )

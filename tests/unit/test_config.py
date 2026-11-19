@@ -6,10 +6,11 @@ from db_guardian.config import ConfigError, load_settings
 
 @pytest.fixture
 def env(monkeypatch, tmp_path):
-    for name in ("ENCRYPTION_KEY", "SIGNING_KEY", "DISPLAY_TZ", "CORS_ORIGINS"):
+    for name in ("ENCRYPTION_KEY", "SIGNING_KEY", "API_TOKEN", "DISPLAY_TZ", "CORS_ORIGINS"):
         monkeypatch.delenv(f"GUARDIAN_{name}", raising=False)
     monkeypatch.setenv("GUARDIAN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("GUARDIAN_SIGNING_KEY", "x" * 32)
+    monkeypatch.setenv("GUARDIAN_API_TOKEN", "a" * 32)
     monkeypatch.setenv("GUARDIAN_DATA_DIR", str(tmp_path))
     return monkeypatch
 
@@ -35,6 +36,18 @@ def test_invalid_fernet_key_fails(env):
 def test_short_signing_key_fails(env):
     env.setenv("GUARDIAN_SIGNING_KEY", "x" * 10)
     with pytest.raises(ConfigError, match="GUARDIAN_SIGNING_KEY"):
+        load_settings()
+
+
+def test_missing_api_token_names_variable(env):
+    env.delenv("GUARDIAN_API_TOKEN")
+    with pytest.raises(ConfigError, match="GUARDIAN_API_TOKEN"):
+        load_settings()
+
+
+def test_short_api_token_rejected(env):
+    env.setenv("GUARDIAN_API_TOKEN", "x" * 10)
+    with pytest.raises(ConfigError, match="GUARDIAN_API_TOKEN"):
         load_settings()
 
 

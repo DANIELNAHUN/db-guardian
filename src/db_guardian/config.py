@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     encryption_key: str
     signing_key: str = Field(min_length=32)
+    api_token: str = Field(min_length=32)
     clone_key: str | None = None
     download_ttl_seconds: int = Field(default=900, ge=1)
     display_tz: str = "UTC"

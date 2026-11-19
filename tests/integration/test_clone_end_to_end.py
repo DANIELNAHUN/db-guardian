@@ -15,6 +15,7 @@ def test_clone_lifecycle_through_the_api(conn80, staging, sql80, tmp_path):
     settings = Settings(
         encryption_key=Fernet.generate_key().decode(),
         signing_key="s" * 32,
+        api_token="t" * 32,
         clone_key="it-clone-key",
         data_dir=tmp_path / "data",
         display_tz="America/Lima",
