@@ -11,13 +11,15 @@ Phase 1 (backups) and phase 2 (clone a backup into another server) are implement
 ## Quick path
 
 1. Create a backup user on each MySQL server (see [Privileges](#mysql-privileges)).
-2. `cp .env.example .env` and fill in `GUARDIAN_ENCRYPTION_KEY` and `GUARDIAN_SIGNING_KEY`
-   (see [Environment variables](#environment-variables)).
+2. `cp .env.example .env` and fill in `GUARDIAN_ENCRYPTION_KEY`, `GUARDIAN_SIGNING_KEY` and
+   `GUARDIAN_API_TOKEN` (see [Environment variables](#environment-variables)).
 3. `docker compose up -d --build`
 4. Register a database:
 
    ```bash
-   curl -X POST http://localhost:8000/sources -H 'Content-Type: application/json' -d '{
+   export TOKEN=<your GUARDIAN_API_TOKEN>
+   curl -X POST http://localhost:8000/sources -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' -d '{
      "name": "intranet", "host": "192.168.1.20", "port": 3306,
      "user": "guardian", "password": "...", "database": "intranet",
      "tables": ["*"], "schedule": "0 3 * * *"
@@ -25,7 +27,7 @@ Phase 1 (backups) and phase 2 (clone a backup into another server) are implement
    ```
 
 5. Check it: `POST /sources/{id}/test-connection`, then run one now with `POST /sources/{id}/backups`.
-6. Watch the result in `GET /backups`.
+6. Watch the result: `curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/backups`.
 
 Interactive API docs are at `http://localhost:8000/docs`.
 
@@ -35,10 +37,11 @@ Interactive API docs are at `http://localhost:8000/docs`.
 |----------|---------|-------|
 | `GUARDIAN_ENCRYPTION_KEY` | required | Fernet key that encrypts stored source passwords. Generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Changing it makes stored passwords unreadable (re-enter them with `PATCH`). |
 | `GUARDIAN_SIGNING_KEY` | required | HMAC key for download links, at least 32 characters. Generate: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. |
+| `GUARDIAN_API_TOKEN` | required | Bearer token every API caller must send as `Authorization: Bearer <token>`, at least 32 characters. Only `GET /health` and `GET /downloads/{id}` are open. Generate like the signing key. |
 | `GUARDIAN_CLONE_KEY` | — | Secret required in the `X-Clone-Key` header to preview or start a clone. Unset = clone endpoints answer 503. Generate like the signing key. |
 | `GUARDIAN_CLONE_TIMEOUT_SECONDS` | `14400` | A restore running longer than this is killed and the clone marked failed. |
 | `GUARDIAN_DISPLAY_TZ` | `UTC` | IANA timezone for cron schedules and API timestamps, e.g. `America/Lima`. |
-| `GUARDIAN_CORS_ORIGINS` | empty | Comma-separated origins allowed from a browser (the intranet UI). |
+| `GUARDIAN_CORS_ORIGINS` | empty | Comma-separated origins allowed to call the API from a browser. The intranet no longer needs it (its backend calls db-guardian; the browser only follows download links), so it can stay empty. |
 | `GUARDIAN_HOST_ADDRESSES` | empty | Comma-separated LAN IPs/hostnames of the machine running db-guardian. The clone guard treats them like `localhost`/`host.docker.internal`, so a target given as this machine's LAN IP is still recognized as a backup source. |
 | `GUARDIAN_DOWNLOAD_TTL_SECONDS` | `900` | Lifetime of signed download links. |
 | `GUARDIAN_DEFAULT_RETENTION` | `3` | Successful backups kept when a source sets no retention. |
@@ -70,6 +73,11 @@ Changes made with `PATCH /sources/{id}` reschedule immediately, without a restar
 
 ## API at a glance
 
+Every route requires `Authorization: Bearer <GUARDIAN_API_TOKEN>` except `GET /health` and
+`GET /downloads/{id}` (already protected by its signature, so a browser can follow the link).
+A missing or wrong token answers `401` with `WWW-Authenticate: Bearer`. Clone routes also need
+`X-Clone-Key`; the token is checked first.
+
 | Method & path | Purpose |
 |---------------|---------|
 | `GET/POST /sources`, `GET/PATCH/DELETE /sources/{id}` | Manage sources. `DELETE` keeps the history. |
@@ -88,7 +96,8 @@ Timestamps are returned in `GUARDIAN_DISPLAY_TZ`.
 
 ## Cloning a backup into staging
 
-Two steps, both with the header `X-Clone-Key: <GUARDIAN_CLONE_KEY>` and the target in the body:
+Two steps, both with the headers `Authorization: Bearer <GUARDIAN_API_TOKEN>` and
+`X-Clone-Key: <GUARDIAN_CLONE_KEY>`, and the target in the body:
 
 ```json
 { "host": "staging.example.com", "port": 3306, "user": "stager", "password": "...", "database": "intranet" }
@@ -112,7 +121,8 @@ What a clone does:
 
 | Response | Meaning |
 |----------|---------|
-| `401` / `403` | Missing / wrong `X-Clone-Key`. |
+| `401` | Missing or wrong API token, or missing `X-Clone-Key`. |
+| `403` | Wrong `X-Clone-Key`. |
 | `409` | The target is one of your backup sources. |
 | `410` | The backup file was removed by retention. |
 | `422` | The target database does not exist or the user cannot access it. |
@@ -153,6 +163,22 @@ What a clone does:
 - **Memory:** capped at 512 MB so it cannot starve the database server.
 - **Accepted risk:** ETL backups live on the same disk as the ETL database. Losing that
   disk loses both. Copying backups off-host is a possible future addition.
+- **Breaking change (API token):** set `GUARDIAN_API_TOKEN` before restarting. Without it the
+  service refuses to start, and every caller (intranet backend, curl scripts, monitoring) must
+  send the token. See [Upgrading an existing deployment](#upgrading-an-existing-deployment).
+
+## Upgrading an existing deployment
+
+Steps to roll out the API token on a running db-guardian:
+
+1. Pull the branch/merge on the server.
+2. Generate a token: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+3. Add `GUARDIAN_API_TOKEN=<token>` to db-guardian's `.env`.
+4. `docker compose up -d --build`.
+5. Update any other caller of db-guardian (curl scripts, monitoring) to send the token;
+   `/health` and `/downloads` stay open.
+6. Put the same token in the intranet backend `.env` as `DB_GUARDIAN_API_TOKEN`, plus
+   `DB_GUARDIAN_BASE_URL` and `DB_GUARDIAN_PUBLIC_URL`.
 
 ## MySQL privileges
 

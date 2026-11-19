@@ -24,7 +24,8 @@ def test_background_startup_recovers_and_shuts_down(container):
         s.commit()
         stale_id, source_id = stale.id, source.id
 
-    with TestClient(create_app(container)) as c:
+    auth = {"Authorization": f"Bearer {container.settings.api_token}"}
+    with TestClient(create_app(container), headers=auth) as c:
         assert c.get("/health").status_code == 200
         assert container.scheduler.get_job(source_id) is not None
         assert c.get(f"/backups/{stale_id}").json()["status"] == "failed"

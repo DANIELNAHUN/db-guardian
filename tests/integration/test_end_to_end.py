@@ -24,7 +24,8 @@ def test_backup_lifecycle_through_the_api(conn, tmp_path, tables, expected):
         display_tz="America/Lima",
     )
     container = build_container(settings)
-    with TestClient(create_app(container)) as client:
+    auth = {"Authorization": f"Bearer {settings.api_token}"}
+    with TestClient(create_app(container), headers=auth) as client:
         source = client.post("/sources", json={
             "name": "shop", "host": conn.host, "port": conn.port, "user": conn.user,
             "password": conn.password, "database": conn.database,

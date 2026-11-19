@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from db_guardian.backups.models import Backup, BackupStatus, FileState
+from db_guardian.auth import require_api_token
 from db_guardian.container import Container
 from db_guardian.deps import get_container
 from db_guardian.downloads.signing import sign, verify
@@ -45,7 +46,11 @@ def _available_file(backup: Backup) -> Path:
     return path
 
 
-@router.post("/backups/{backup_id}/download-url", response_model=DownloadUrlOut)
+@router.post(
+    "/backups/{backup_id}/download-url",
+    response_model=DownloadUrlOut,
+    dependencies=[Depends(require_api_token)],
+)
 def create_download_url(backup_id: int, c: Container = Depends(get_container)):
     with c.session_factory() as session:
         backup = session.get(Backup, backup_id)

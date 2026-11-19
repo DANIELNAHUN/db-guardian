@@ -25,7 +25,8 @@ def test_clone_lifecycle_through_the_api(conn80, staging, sql80, tmp_path):
         "host": staging.host, "port": staging.port, "user": staging.user,
         "password": staging.password, "database": staging.database,
     }
-    with TestClient(create_app(container)) as client:
+    auth = {"Authorization": f"Bearer {settings.api_token}"}
+    with TestClient(create_app(container), headers=auth) as client:
         source = client.post("/sources", json={
             "name": "shop", "host": conn80.host, "port": conn80.port, "user": conn80.user,
             "password": conn80.password, "database": conn80.database,

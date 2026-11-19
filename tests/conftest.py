@@ -25,6 +25,14 @@ def container(settings):
 
 
 @pytest.fixture
-def client(container):
+def client(container, settings):
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    with TestClient(create_app(container, start_background=False), headers=headers) as c:
+        yield c
+
+
+@pytest.fixture
+def anon_client(container):
+    """A client that sends no Authorization header."""
     with TestClient(create_app(container, start_background=False)) as c:
         yield c

@@ -5,11 +5,12 @@ from sqlalchemy import func, select
 
 from db_guardian.backups.models import Backup, BackupStatus
 from db_guardian.backups.schemas import BackupDetailOut, BackupPage, backup_detail_out, backup_out
+from db_guardian.auth import require_api_token
 from db_guardian.container import Container
 from db_guardian.deps import get_container
 from db_guardian.timefmt import from_client
 
-router = APIRouter(prefix="/backups", tags=["backups"])
+router = APIRouter(prefix="/backups", tags=["backups"], dependencies=[Depends(require_api_token)])
 
 
 @router.get("", response_model=BackupPage)

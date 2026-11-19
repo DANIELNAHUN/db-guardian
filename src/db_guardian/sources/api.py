@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from db_guardian.backups.models import BackupTrigger
 from db_guardian.backups.schemas import BackupOut, backup_out
 from db_guardian.backups.service import SourceUnavailable, enqueue_backup
+from db_guardian.auth import require_api_token
 from db_guardian.container import Container
 from db_guardian.deps import get_container
 from db_guardian.sources.models import Source
@@ -12,7 +13,7 @@ from db_guardian.sources.schemas import ConnectionTestOut, SourceCreate, SourceO
 from db_guardian.sources.service import NameConflict, NotFound, SourceService
 from db_guardian.timefmt import to_display
 
-router = APIRouter(prefix="/sources", tags=["sources"])
+router = APIRouter(prefix="/sources", tags=["sources"], dependencies=[Depends(require_api_token)])
 
 
 def get_service(container: Container = Depends(get_container)) -> Iterator[SourceService]:

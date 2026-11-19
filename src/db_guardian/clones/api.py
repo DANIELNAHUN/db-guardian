@@ -5,11 +5,12 @@ from db_guardian.clones.models import Clone, CloneStatus
 from db_guardian.clones.schemas import CloneOut, ClonePage, ClonePreviewOut, TargetIn
 from db_guardian.clones.security import require_clone_key
 from db_guardian.clones.service import CloneRejected, build_preview, enqueue_clone
+from db_guardian.auth import require_api_token
 from db_guardian.container import Container
 from db_guardian.deps import get_container
 from db_guardian.timefmt import to_display
 
-router = APIRouter(tags=["clones"])
+router = APIRouter(tags=["clones"], dependencies=[Depends(require_api_token)])
 
 
 def _http(exc: CloneRejected) -> HTTPException:
